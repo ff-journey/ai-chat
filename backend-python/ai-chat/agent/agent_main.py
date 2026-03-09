@@ -14,7 +14,7 @@ from .llm_config import get_llm
 from .agent_state import WorkerState
 from .worker.map_worker import get_weather_tour_advice_app
 
-WORKERS = ["map_worker"]
+WORKERS = ["map_worker", "chat"]
 os.environ["LANGCHAIN_TRACING_V2"] = "true"  # 总开关，决定启用追踪功能
 os.environ["LANGCHAIN_PROJECT"] = "ai_chat_test"  # 自定义项目名
 os.environ["LANGSMITH_ENDPOINT"] = "https://api.smith.langchain.com"
@@ -59,6 +59,7 @@ def supervisor(state: WorkerState, config: RunnableConfig):
     可选的 Agent：
     - map_worker：获得当前以及未来3天的详细天气预报和路况信息 。
     - ai_search：网络搜索
+    - chat：普通对话
     - FINISH：任务已完成，直接回复用户
     
     只返回一个 Agent 名称，不要有任何其他内容。
@@ -85,6 +86,7 @@ workflow = StateGraph(WorkerState)
 
 workflow.add_node("supervisor", supervisor)
 workflow.add_node("map_worker", map_worker)
+workflow.add_node("chat", chat_node)
 workflow.add_node("tools", tool_node)
 
 workflow.add_edge(START, "supervisor")
