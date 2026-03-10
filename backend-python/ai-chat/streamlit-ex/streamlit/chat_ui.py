@@ -1,6 +1,8 @@
 import asyncio
+import os
 
 import streamlit as st
+from dotenv import load_dotenv
 from langchain_openai.chat_models import ChatOpenAI
 from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_core.messages import ChatMessage, SystemMessage, AIMessage, HumanMessage
@@ -46,15 +48,18 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+file_a_path = os.path.abspath(__file__)
+file_a_dir = os.path.dirname(file_a_path)
+target_path = os.path.join(file_a_dir, "../../agent.env")
+load_dotenv(dotenv_path=target_path)
+DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
+AMAP_API_KEY = os.getenv("AMAP_API_KEY")
+ALI_SEARCH_API_KEY = os.getenv("ALI_SEARCH_API_KEY")
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY")
 
-
-openai_api_key = st.sidebar.text_input("OpenAI API Key", type="password", value="sk-3b493113d25f41e18129d9384d62fc24")
+openai_api_key = st.sidebar.text_input("OpenAI API Key", type="password", value=DASHSCOPE_API_KEY)
 base_url = st.sidebar.text_input("OpenAI API Url",value="https://dashscope.aliyuncs.com/compatible-mode/v1")
 
-
-def generate_response(input_text):
-    model = ChatOpenAI(temperature=0.7, api_key="sk-3b493113d25f41e18129d9384d62fc24", model="qwen-turbo", base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
-    st.info(model.invoke(input_text))
 
 
 if "app" not in st.session_state:

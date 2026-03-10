@@ -1,6 +1,8 @@
+import datetime
 import os
 from typing import TypedDict, Annotated
 
+from dotenv import load_dotenv
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver
@@ -12,13 +14,23 @@ from langgraph.graph import MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, InjectedState
 from .llm_config import get_llm
 from .agent_state import WorkerState
-from .worker.map_worker import get_weather_tour_advice_app
+from .worker.map_worker import get_weather_tour_advice
 
 WORKERS = ["map_worker", "chat"]
+
+file_a_path = os.path.abspath(__file__)
+file_a_dir = os.path.dirname(file_a_path)
+target_path = os.path.join(file_a_dir, ".env")
+load_dotenv(dotenv_path=target_path)
+DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
+AMAP_API_KEY = os.getenv("AMAP_API_KEY")
+ALI_SEARCH_API_KEY = os.getenv("ALI_SEARCH_API_KEY")
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY")
 os.environ["LANGCHAIN_TRACING_V2"] = "true"  # 总开关，决定启用追踪功能
 os.environ["LANGCHAIN_PROJECT"] = "ai_chat_test"  # 自定义项目名
 os.environ["LANGSMITH_ENDPOINT"] = "https://api.smith.langchain.com"
-os.environ["LANGSMITH_API_KEY"] = ""
+os.environ["LANGSMITH_API_KEY"] =LANGSMITH_API_KEY
+
 def route_supervisor(state: WorkerState):
     if state['next'] == "FINISH":
         return END
@@ -28,6 +40,8 @@ def should_continue(state: WorkerState):
     last_msg = state['messages'][-1]
     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
         return "tools"
+    if state['current_agent'] == "chat" or state['current_agent'] == "map_worker":
+        return END
     return "supervisor"
 
 def route_after_tool(state:WorkerState):
@@ -43,22 +57,23 @@ def chat_node(state: WorkerState, config: RunnableConfig):
         msg for msg in state["messages"]
         if not isinstance(msg, SystemMessage)
     ]
-
+    chat_system = f"你非常可爱，说话末尾会带个喵, 当前时间: {datetime.datetime.now()}"
+    messages = [SystemMessage(content=chat_system)] + clean_messages
     llm = get_llm(
         configurable.get("model_name"),
         configurable.get("api_key"),
         configurable.get("base_url")
     )
-    response = llm.invoke(clean_messages)
-
-    # 把回复追加到 messages，下次 supervisor 看到它就会判断 FINISH
-    return {"messages": [response]}
+    llm = llm.bind_tools([ai_search])
+    response = llm.invoke(messages)
+    print(clean_messages)
+    print(response)
+    return {"messages": [response], "current_agent":"chat"}
 
 def supervisor(state: WorkerState, config: RunnableConfig):
     supervisor_prompt = f"""你是一个任务分发助手，根据用户的问题决定交给哪个 Agent 处理。
     可选的 Agent：
     - map_worker：获得当前以及未来3天的详细天气预报和路况信息 。
-    - ai_search：网络搜索
     - chat：普通对话
     - FINISH：任务已完成，直接回复用户
     
@@ -70,17 +85,16 @@ def supervisor(state: WorkerState, config: RunnableConfig):
         if not isinstance(msg, SystemMessage)
     ]
     messages = [SystemMessage(content=supervisor_prompt)] + clean_messages
-    print(messages)
     llm = get_llm(configurable.get("model_name"), configurable.get("api_key"), configurable.get("base_url"))
     response = llm.invoke(messages)
     next_agent = response.content.strip()
     # 防止 LLM 返回非法值
     if next_agent not in WORKERS:
         next_agent = "FINISH"
-    return {"next": next_agent}
+    return {"next": next_agent, "current_agent":"supervisor"}
 
 tool_node = ToolNode([ai_search])
-map_worker = get_weather_tour_advice_app
+map_worker = get_weather_tour_advice
 
 workflow = StateGraph(WorkerState)
 
@@ -92,7 +106,7 @@ workflow.add_node("tools", tool_node)
 workflow.add_edge(START, "supervisor")
 workflow.add_conditional_edges("supervisor", route_supervisor)
 for next in WORKERS:
-    workflow.add_conditional_edges(next, should_continue, {"tools":"tools", "supervisor":"supervisor"})
+    workflow.add_conditional_edges(next, should_continue, {"tools":"tools", "supervisor":"supervisor",END:END})
 
 workflow.add_conditional_edges("tools", route_after_tool)
 app = workflow.compile(
