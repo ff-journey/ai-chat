@@ -1,6 +1,6 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.4.5'
+    id 'org.springframework.boot' version '3.5.11'
     id 'io.spring.dependency-management' version '1.1.7'
 }
 
@@ -22,6 +22,12 @@ configurations {
 repositories {
     mavenCentral()
 }
+tasks.withType(JavaExec).configureEach {
+    jvmArgs '-Dfile.encoding=UTF-8'
+    jvmArgs '-Dfile.encoding=UTF-8'
+    jvmArgs '-Dstdout.encoding=UTF-8'
+    jvmArgs '-Dstderr.encoding=UTF-8'
+}
 
 dependencies {
 //    implementation 'org.springframework.boot:spring-boot-starter-webflux'
@@ -30,9 +36,14 @@ dependencies {
 //    testImplementation 'org.springframework.boot:spring-boot-starter-webflux-test'
     implementation 'org.springframework.boot:spring-boot-starter-web'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-    implementation 'com.alibaba.cloud.ai:spring-ai-alibaba-agent-framework:1.1.2.0'
+    implementation platform('com.alibaba.cloud.ai:spring-ai-alibaba-bom:1.1.2.0')
+    implementation platform('org.springframework.ai:spring-ai-bom:1.1.2')
+    implementation platform('com.alibaba.cloud.ai:spring-ai-alibaba-extensions-bom:1.1.2.1')
 
-    implementation 'com.alibaba.cloud.ai:spring-ai-alibaba-starter-dashscope:1.1.2.1'
+    implementation 'com.alibaba.cloud.ai:spring-ai-alibaba-agent-framework'
+    implementation 'com.alibaba.cloud.ai:spring-ai-alibaba-starter-dashscope'
+
+    implementation 'com.alibaba.cloud.ai:spring-ai-alibaba-studio:1.1.2.0'
 }
 
 tasks.named('test') {

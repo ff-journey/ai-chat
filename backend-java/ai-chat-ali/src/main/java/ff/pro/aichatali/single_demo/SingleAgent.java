@@ -2,19 +2,34 @@ package ff.pro.aichatali.single_demo;
 
 import com.alibaba.cloud.ai.dashscope.api.DashScopeApi;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
+import com.alibaba.cloud.ai.dashscope.spec.DashScopeModel;
+import com.alibaba.cloud.ai.graph.NodeOutput;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
+import com.alibaba.cloud.ai.graph.agent.interceptor.ToolCallHandler;
+import com.alibaba.cloud.ai.graph.agent.interceptor.ToolCallRequest;
+import com.alibaba.cloud.ai.graph.agent.interceptor.ToolCallResponse;
+import com.alibaba.cloud.ai.graph.agent.interceptor.ToolInterceptor;
+import com.alibaba.cloud.ai.graph.agent.interceptor.toolerror.ToolErrorInterceptor;
 import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
+import com.alibaba.cloud.ai.graph.streaming.OutputType;
+import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.ai.tool.function.FunctionToolCallback;
+import reactor.core.publisher.Flux;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiFunction;
+
+import static com.alibaba.cloud.ai.graph.agent.tools.ToolContextConstants.AGENT_CONFIG_CONTEXT_KEY;
 
 /**
  * @author journey
@@ -30,6 +45,7 @@ public class SingleAgent {
 
     ChatModel chatModel = DashScopeChatModel.builder()
             .dashScopeApi(dashScopeApi)
+            .defaultOptions(DashScopeChatOptions.builder().model(DashScopeModel.ChatModel.QWEN_TURBO.getValue()).build())
             .build();
 
     // 定义天气查询工具
@@ -45,13 +61,20 @@ public class SingleAgent {
             .inputType(String.class)
             .build();
 
+    ToolCallback getUserLocationTool = FunctionToolCallback
+            .builder("getUserLocation", new UserLocationTool())
+            .description("Retrieve user location based on user ID")
+            .inputType(String.class)
+            .build();
+
     // 创建 agent
     ReactAgent agent = ReactAgent.builder()
             .name("weather_agent")
             .model(chatModel)
-            .tools(weatherTool)
+            .tools(List.of(weatherTool, getUserLocationTool))
             .systemPrompt("You are a helpful assistant")
             .saver(new MemorySaver())
+            .interceptors(List.of(new ToolErrorInterceptor()))
             .build();
     // 用户位置工具 - 使用上下文
     public class UserLocationTool implements BiFunction<String, ToolContext, String> {
@@ -75,16 +98,66 @@ public class SingleAgent {
             return "1".equals(userId) ? "Florida" : "San Francisco";
         }
     }
-    ToolCallback getUserLocationTool = FunctionToolCallback
-            .builder("getUserLocation", new UserLocationTool())
-            .description("Retrieve user location based on user ID")
-            .inputType(String.class)
-            .build();
-    public void run() throws GraphRunnerException {
-        // 运行 agent
-        AssistantMessage response = agent.call("what is the weather in San Francisco");
-        System.out.println(response.getText());
+    public class ToolErrorInterceptor extends ToolInterceptor {
+        @Override
+        public ToolCallResponse interceptToolCall(ToolCallRequest request, ToolCallHandler handler) {
+            try {
+                return handler.call(request);
+            } catch (Exception e) {
+                return ToolCallResponse.of(request.getToolCallId(), request.getToolName(),
+                        "Tool failed: " + e.getMessage());
+            }
+        }
+
+        @Override
+        public String getName() {
+            return "ToolErrorInterceptor";
+        }
     }
+    public void run() throws GraphRunnerException {
+        RunnableConfig config = RunnableConfig.builder()
+                .threadId("thread_id_1")
+                .addMetadata("user_id", "1")
+                .build();
+        // 运行 agent
+//        AssistantMessage response = agent.call("where am i", config);
+//        System.out.println(response.getText());
+
+        Flux<NodeOutput> stream = agent.stream("where am i", config);
+        stream.subscribe(
+                output -> {
+                    // 检查是否为 StreamingOutput 类型
+                    if (output instanceof StreamingOutput streamingOutput) {
+                        OutputType type = streamingOutput.getOutputType();
+
+                        // 处理模型推理的流式输出
+                        if (type == OutputType.AGENT_MODEL_STREAMING) {
+                            // 流式增量内容，逐步显示
+                            System.out.print(streamingOutput.message().getText());
+                        } else if (type == OutputType.AGENT_MODEL_FINISHED) {
+                            // 模型推理完成，可获取完整响应
+                            System.out.println("\n模型输出完成");
+                        }
+
+                        // 处理工具调用完成（目前不支持 STREAMING）
+                        if (type == OutputType.AGENT_TOOL_FINISHED) {
+                            System.out.println("工具调用完成: " + output.node());
+                        }
+
+                        // 对于 Hook 节点，通常只关注完成事件（如果Hook没有有效输出可以忽略）
+                        if (type == OutputType.AGENT_HOOK_FINISHED) {
+                            System.out.println("Hook 执行完成: " + output.node());
+                        }
+                    }
+                },
+                error -> System.err.println("错误: " + error),
+                () -> System.out.println("Agent 执行完成")
+        );
+        stream.blockLast();
+    }
+
+
+
 
     public static void main(String[] args) {
 
