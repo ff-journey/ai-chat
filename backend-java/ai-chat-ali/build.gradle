@@ -49,3 +49,68 @@ dependencies {
 tasks.named('test') {
     useJUnitPlatform()
 }
+
+// ============================================================
+// 前端构建任务：构建 agent-chat-ui 并复制到 Spring Boot 静态资源
+// ============================================================
+
+def frontendDir = file("${rootDir}/../agent-chat-ui")
+def frontendOutDir = file("${frontendDir}/out")
+def staticChatuiDir = file("${projectDir}/src/main/resources/static/chatui")
+def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+
+// 检测包管理器：优先 pnpm，其次 npm
+def detectPkgManager() {
+    try {
+        def cmd = System.getProperty('os.name').toLowerCase().contains('windows')
+            ? ['cmd', '/c', 'pnpm', '--version']
+            : ['pnpm', '--version']
+        def proc = cmd.execute()
+        proc.waitFor()
+        if (proc.exitValue() == 0) return 'pnpm'
+    } catch (ignored) {}
+    return 'npm'
+}
+
+task frontendInstall(type: Exec) {
+    description = '安装前端依赖'
+    group = 'frontend'
+    workingDir frontendDir
+    def pm = detectPkgManager()
+    if (isWindows) {
+        commandLine 'cmd', '/c', pm, 'install'
+    } else {
+        commandLine pm, 'install'
+    }
+    inputs.file("${frontendDir}/package.json")
+    outputs.dir("${frontendDir}/node_modules")
+}
+
+task frontendBuild(type: Exec) {
+    description = '构建前端静态文件（STATIC_EXPORT 模式）'
+    group = 'frontend'
+    dependsOn frontendInstall
+    workingDir frontendDir
+    def pm = detectPkgManager()
+    environment 'STATIC_EXPORT', 'true'
+    if (isWindows) {
+        commandLine 'cmd', '/c', pm, 'run', 'build'
+    } else {
+        commandLine pm, 'run', 'build'
+    }
+    inputs.dir("${frontendDir}/src")
+    inputs.file("${frontendDir}/next.config.mjs")
+    inputs.file("${frontendDir}/package.json")
+    outputs.dir(frontendOutDir)
+}
+
+task frontendCopy(type: Copy) {
+    description = '复制前端构建产物到 Spring Boot 静态资源目录'
+    group = 'frontend'
+    dependsOn frontendBuild
+    from frontendOutDir
+    into staticChatuiDir
+}
+
+// 让 processResources 依赖前端构建，这样 bootJar/bootRun 都会自动触发
+processResources.dependsOn frontendCopy
