@@ -120,3 +120,6 @@ You are extending the `spring-ai-alibaba-studio` module. Follow the architecture
 - SSE responses use `Flux<ServerSentEvent<T>>`
 - Graph threads use `"graph:" + graphName` as appName prefix for namespace isolation
 - Full integration guide: `docs/studio-integration-guide.md`
+
+
+## Plainning生成后立即保存成文件

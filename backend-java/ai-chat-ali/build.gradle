@@ -56,7 +56,10 @@ tasks.named('test') {
 
 def frontendDir = file("${rootDir}/../agent-chat-ui")
 def frontendOutDir = file("${frontendDir}/out")
-def staticChatuiDir = file("${projectDir}/src/main/resources/static/chatui")
+// 放到 META-INF/resources/chatui/ 与 Studio JAR 同路径，确保本地资源覆盖 JAR 内的
+def staticChatuiDir = file("${projectDir}/src/main/resources/META-INF/resources/chatui")
+// 旧版前端目录（Studio JAR 默认的），必须清除以免覆盖新 UI
+def legacyChatuiDir = file("${projectDir}/src/main/resources/static/chatui")
 def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
 
 // 检测包管理器：优先 pnpm，其次 npm
@@ -104,10 +107,16 @@ task frontendBuild(type: Exec) {
     outputs.dir(frontendOutDir)
 }
 
+task frontendClean(type: Delete) {
+    description = '清理旧前端资源（static/chatui 和 META-INF 目标目录）'
+    group = 'frontend'
+    delete staticChatuiDir, legacyChatuiDir
+}
+
 task frontendCopy(type: Copy) {
     description = '复制前端构建产物到 Spring Boot 静态资源目录'
     group = 'frontend'
-    dependsOn frontendBuild
+    dependsOn frontendClean, frontendBuild
     from frontendOutDir
     into staticChatuiDir
 }

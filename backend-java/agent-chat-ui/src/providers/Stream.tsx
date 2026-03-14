@@ -182,148 +182,146 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
             data: block.data!,
           }));
 
-        const userMessageForApi: import("@/lib/spring-ai-api").UserMessage = {
-          messageType: "user",
-          content: content.trim(),
-          metadata: {},
-          media: mediaItems
-        };
+        // Route: multimodal (has images) → /api/chat/multimodal
+        //        normal text        → /run_sse (Studio protocol)
+        if (mediaItems.length > 0) {
+          console.log('[Stream] Using multimodal endpoint for image upload');
 
-        const stream = mode === 'graph'
-          ? apiClient.runGraphStream(
-              selectedGraph,
-              userId,
-              activeThreadId,
-              userMessageForApi,
-              abortControllerRef.current.signal
-            )
-          : apiClient.runAgentStream(
-              appName,
-              userId,
-              activeThreadId,
-              userMessageForApi,
-              abortControllerRef.current.signal
-            );
+          const multimodalStream = apiClient.runMultimodalStream(
+            content.trim(),
+            activeThreadId,
+            mediaItems,
+            abortControllerRef.current.signal
+          );
 
-        let isFirstChunk = true;
-        console.log('[Stream] Starting to process agent responses...');
-
-        for await (const agentResponse of stream) {
-          console.log('[Stream] Received agent response:', agentResponse);
-
-          // Skip heartbeat messages
-          if (agentResponse.node === "heartbeat") {
-            console.log('[Stream] Skipping heartbeat message');
-            continue;
-          }
-
-          // Use chunk for streaming updates if available
-          if (agentResponse.chunk) {
-            console.log('[Stream] Processing chunk:', agentResponse.chunk);
-
-            // Defensive check: if message exists, verify it's an assistant message (streaming only for assistant)
-            if (agentResponse.message) {
-              if (agentResponse.message.messageType !== 'assistant') {
-                console.warn(
-                  '[Stream] Warning: chunk exists but message type is not assistant:',
-                  agentResponse.message.messageType,
-                  'This indicates a backend data format issue.'
-                );
-              }
-            }
-
+          let isFirstChunk = true;
+          for await (const chunk of multimodalStream) {
             if (isFirstChunk) {
-              // Create new assistant message for first chunk
               const newAssistantMessage: UIMessage = {
                 id: `assistant-${Date.now()}`,
                 message: {
                   messageType: 'assistant',
-                  content: agentResponse.chunk,
+                  content: chunk,
                   metadata: {},
-                  toolCalls: []
                 },
                 timestamp: Date.now()
               };
-              setMessages((prev) => {
-                console.log('[Stream] Adding first chunk, prev messages:', prev.length);
-                return [...prev, newAssistantMessage];
-              });
+              setMessages((prev) => [...prev, newAssistantMessage]);
               isFirstChunk = false;
             } else {
-              // Append chunk to existing content - create completely new objects
               setMessages((prev) => {
                 const newMessages = [...prev];
-                const lastMessage = newMessages[newMessages.length - 1];
+                const last = newMessages[newMessages.length - 1];
                 newMessages[newMessages.length - 1] = {
-                  ...lastMessage,
+                  ...last,
                   message: {
-                    ...lastMessage.message,
-                    content: lastMessage.message.content + agentResponse.chunk
+                    ...last.message,
+                    content: last.message.content + chunk
                   }
                 };
-                console.log('[Stream] Updated message content length:', newMessages[newMessages.length - 1].message.content.length);
                 return newMessages;
               });
             }
-          } else if (agentResponse.message) {
-            console.log('[Stream] Processing message:', agentResponse.message);
+          }
+        } else {
+          // Standard Studio protocol path (/run_sse)
+          const userMessageForApi: import("@/lib/spring-ai-api").UserMessage = {
+            messageType: "user",
+            content: content.trim(),
+            metadata: {},
+            media: []
+          };
 
-            // Convert from backend DTO to frontend Message type
-            const backendMessage = fromMessageDTO(agentResponse.message);
+          const stream = mode === 'graph'
+            ? apiClient.runGraphStream(
+                selectedGraph,
+                userId,
+                activeThreadId,
+                userMessageForApi,
+                abortControllerRef.current.signal
+              )
+            : apiClient.runAgentStream(
+                appName,
+                userId,
+                activeThreadId,
+                userMessageForApi,
+                abortControllerRef.current.signal
+              );
 
-            // Handle different message types appropriately
-            // For streaming responses, we typically expect assistant messages with chunks
-            // But tool-request, tool-confirm, and tool responses come as complete messages
-            const messageType = agentResponse.message.messageType;
+          let isFirstChunk = true;
+          console.log('[Stream] Starting to process agent responses...');
 
-            if (messageType === 'assistant' || messageType === 'tool-request') {
-              // Assistant and tool-request messages can be streamed or complete
+          for await (const agentResponse of stream) {
+            console.log('[Stream] Received agent response:', agentResponse);
+
+            if (agentResponse.node === "heartbeat") continue;
+
+            if (agentResponse.chunk) {
               if (isFirstChunk) {
-                const newMessage: UIMessage = {
-                  id: `${messageType}-${Date.now()}`,
-                  message: backendMessage,
+                const newAssistantMessage: UIMessage = {
+                  id: `assistant-${Date.now()}`,
+                  message: {
+                    messageType: 'assistant',
+                    content: agentResponse.chunk,
+                    metadata: {},
+                    toolCalls: []
+                  },
                   timestamp: Date.now()
                 };
-                setMessages((prev) => {
-                  console.log('[Stream] Adding first message, prev messages:', prev.length);
-                  return [...prev, newMessage];
-                });
+                setMessages((prev) => [...prev, newAssistantMessage]);
                 isFirstChunk = false;
               } else {
                 setMessages((prev) => {
                   const newMessages = [...prev];
                   const lastMessage = newMessages[newMessages.length - 1];
-
-                  // IMPORTANT: In streaming scenarios, preserve existing content if new content is empty
-                  // This prevents accumulated content from being cleared by empty updates
-                  const updatedContent = backendMessage.content || lastMessage.message.content;
-
                   newMessages[newMessages.length - 1] = {
                     ...lastMessage,
                     message: {
-                      ...backendMessage,
-                      content: updatedContent
+                      ...lastMessage.message,
+                      content: lastMessage.message.content + agentResponse.chunk
                     }
                   };
-                  console.log('[Stream] Updated message content:', updatedContent?.length, 'chars');
                   return newMessages;
                 });
               }
-            } else if (messageType === 'tool-confirm' || messageType === 'tool') {
-              // Tool-confirm and tool response messages are always complete, add as new messages
-              const newMessage: UIMessage = {
-                id: `${messageType}-${Date.now()}`,
-                message: backendMessage,
-                timestamp: Date.now()
-              };
-              setMessages((prev) => [...prev, newMessage]);
-              // Reset isFirstChunk for next potential assistant message
-              isFirstChunk = true;
-            } else {
-              console.warn('[Stream] Unknown message type:', messageType);
+            } else if (agentResponse.message) {
+              const backendMessage = fromMessageDTO(agentResponse.message);
+              const messageType = agentResponse.message.messageType;
+
+              if (messageType === 'assistant' || messageType === 'tool-request') {
+                if (isFirstChunk) {
+                  const newMessage: UIMessage = {
+                    id: `${messageType}-${Date.now()}`,
+                    message: backendMessage,
+                    timestamp: Date.now()
+                  };
+                  setMessages((prev) => [...prev, newMessage]);
+                  isFirstChunk = false;
+                } else {
+                  setMessages((prev) => {
+                    const newMessages = [...prev];
+                    const lastMessage = newMessages[newMessages.length - 1];
+                    const updatedContent = backendMessage.content || lastMessage.message.content;
+                    newMessages[newMessages.length - 1] = {
+                      ...lastMessage,
+                      message: {
+                        ...backendMessage,
+                        content: updatedContent
+                      }
+                    };
+                    return newMessages;
+                  });
+                }
+              } else if (messageType === 'tool-confirm' || messageType === 'tool') {
+                const newMessage: UIMessage = {
+                  id: `${messageType}-${Date.now()}`,
+                  message: backendMessage,
+                  timestamp: Date.now()
+                };
+                setMessages((prev) => [...prev, newMessage]);
+                isFirstChunk = true;
+              }
             }
-          } else {
-            console.log('[Stream] No chunk or message in response');
           }
         }
 

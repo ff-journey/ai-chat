@@ -554,6 +554,49 @@ class SpringAIApiClient {
     }
   }
 
+  // Multimodal endpoint: sends message + images to /api/chat/multimodal
+  // Returns plain-text SSE chunks (not JSON AgentRunResponse)
+  async *runMultimodalStream(
+    message: string,
+    threadId: string,
+    media: MediaDTO[],
+    signal?: AbortSignal
+  ): AsyncGenerator<string, void, unknown> {
+    const response = await fetch(`${this.baseUrl}/api/chat/multimodal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      body: JSON.stringify({ message, threadId, media }),
+      signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to run multimodal stream: ${response.statusText}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('Response body is not readable');
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('data:')) {
+            const data = line.slice(5);
+            if (data) yield data;
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
   // 获取会话追踪信息
   async getSessionTrace(threadId: string): Promise<any[]> {
     const response = await fetch(
