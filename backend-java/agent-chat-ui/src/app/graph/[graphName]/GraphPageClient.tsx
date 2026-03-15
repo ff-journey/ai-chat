@@ -5,9 +5,27 @@ import { Toaster } from "@/components/ui/sonner";
 import { GraphThreadProvider } from "@/providers/GraphThread";
 import { GraphStreamProvider } from "@/providers/GraphStream";
 import { GraphWorkspace } from "@/components/graph/GraphWorkspace";
+import { AuthProvider, useAuth } from "@/providers/Auth";
+import { LoginPage } from "@/components/LoginPage";
 
 interface GraphPageClientProps {
   graphName: string;
+}
+
+function GraphPageInner({ graphName }: GraphPageClientProps) {
+  const { isAuthenticated } = useAuth();
+
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
+
+  return (
+    <GraphThreadProvider graphName={graphName}>
+      <GraphStreamProvider>
+        <GraphWorkspace />
+      </GraphStreamProvider>
+    </GraphThreadProvider>
+  );
 }
 
 export function GraphPageClient({ graphName }: GraphPageClientProps) {
@@ -20,13 +38,9 @@ export function GraphPageClient({ graphName }: GraphPageClientProps) {
   }
 
   return (
-    <>
+    <AuthProvider>
       <Toaster />
-      <GraphThreadProvider graphName={graphName}>
-        <GraphStreamProvider>
-          <GraphWorkspace />
-        </GraphStreamProvider>
-      </GraphThreadProvider>
-    </>
+      <GraphPageInner graphName={graphName} />
+    </AuthProvider>
   );
 }

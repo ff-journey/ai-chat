@@ -72,10 +72,11 @@ export function useFileUpload({
       );
     }
 
-    const newBlocks = uniqueFiles.length
-      ? await Promise.all(uniqueFiles.map(fileToContentBlock))
-      : [];
-    setContentBlocks((prev) => [...prev, ...newBlocks]);
+    if (validFiles.length > 0) {
+      // Only use the first valid file; replace any existing image block (single image per message)
+      const newBlock = await fileToContentBlock(validFiles[0]);
+      setContentBlocks((prev) => [...prev.filter((b) => b.type !== "image"), newBlock]);
+    }
     e.target.value = "";
   };
 
@@ -132,10 +133,10 @@ export function useFileUpload({
         );
       }
 
-      const newBlocks = uniqueFiles.length
-        ? await Promise.all(uniqueFiles.map(fileToContentBlock))
-        : [];
-      setContentBlocks((prev) => [...prev, ...newBlocks]);
+      if (validFiles.length > 0) {
+        const newBlock = await fileToContentBlock(validFiles[0]);
+        setContentBlocks((prev) => [...prev.filter((b) => b.type !== "image"), newBlock]);
+      }
     };
     const handleWindowDragEnd = (e: DragEvent) => {
       dragCounter.current = 0;
@@ -252,8 +253,8 @@ export function useFileUpload({
       );
     }
     if (uniqueFiles.length > 0) {
-      const newBlocks = await Promise.all(uniqueFiles.map(fileToContentBlock));
-      setContentBlocks((prev) => [...prev, ...newBlocks]);
+      const newBlock = await fileToContentBlock(uniqueFiles[0]);
+      setContentBlocks((prev) => [...prev.filter((b) => b.type !== "image"), newBlock]);
     }
   };
 

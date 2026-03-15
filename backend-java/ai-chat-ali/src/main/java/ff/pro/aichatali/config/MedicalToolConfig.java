@@ -24,7 +24,7 @@ public class MedicalToolConfig {
     @Data
     public static class VllmConfig {
         private String url = "http://localhost:8000/v1/chat/completions";
-        private String model = "qwen3-0.6b";
+        private String model = "qwen3-medical";
         private boolean enabled = true;
     }
 

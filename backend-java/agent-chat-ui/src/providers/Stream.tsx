@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
-import { createApiClient, ToolFeedbackDTO, MediaDTO } from "@/lib/spring-ai-api";
+import { createApiClient, ToolFeedbackDTO } from "@/lib/spring-ai-api";
 import { UIMessage, createUIMessage, fromMessageDTO } from "@/types/messages";
 
 export interface ContentBlock {
@@ -63,8 +63,15 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
   const [messages, setMessages] = useState<UIMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-  const { currentThreadId, createThread, isNewlyCreatedThread, appName, userId, mode, selectedGraph } = useThreads();
+  const { currentThreadId, createThread, appName, userId, mode, selectedGraph, updateThreadSummary } = useThreads();
   const abortControllerRef = useRef<AbortController | null>(null);
+  const skipNextLoadRef = useRef(false);
+  const messagesRef = useRef<UIMessage[]>([]);
+
+  // Keep messagesRef in sync with messages state
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const loadThreadMessages = async (threadId: string) => {
     if (mode === 'agent' && !appName) return;
@@ -80,33 +87,27 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
 
       console.log('[Stream] Loaded session:', session);
 
-      // Extract messages from session.values.messages
+      // Extract messages from session.values.messages (Studio protocol)
       if (session.values && Array.isArray(session.values.messages) && session.values.messages.length > 0) {
         const loadedMessages = session.values.messages.map((msg, index) =>
           createUIMessage(fromMessageDTO(msg), `${threadId}-${index}`)
         );
         setMessages(loadedMessages);
-        console.log('[Stream] Loaded messages:', loadedMessages);
+        console.log('[Stream] Loaded messages from session:', loadedMessages);
       } else {
-        // Check if this is a newly created thread
-        const isNewThread = isNewlyCreatedThread(threadId);
-
-        if (isNewThread) {
-          // For newly created threads, just show empty - user can start chatting
-          console.log('[Stream] Newly created thread - showing empty state');
-          setMessages([]);
-        } else {
-          // For existing threads with no messages, show development notice
-          console.log('[Stream] Existing thread with empty values - showing development notice');
-          const placeholderMessage = createUIMessage(
-            {
-              messageType: 'assistant',
-              content: '💡 Support for agent message loading is under development.\n\nThis thread exists but its message history cannot be displayed yet.\n\nPlease create a new thread to start a conversation.',
-              metadata: { isPlaceholder: true }
-            },
-            `${threadId}-placeholder`
+        // Fallback: custom history endpoint (reads from MemorySaver / ChatHistoryService)
+        console.log('[Stream] Session values empty, trying custom history endpoint...');
+        const historyMsgs = await apiClient.getThreadHistory(threadId, appName);
+        if (historyMsgs.length > 0) {
+          const loadedMessages = historyMsgs.map((msg, index) =>
+            createUIMessage(fromMessageDTO(msg), `${threadId}-${index}`)
           );
-          setMessages([placeholderMessage]);
+          setMessages(loadedMessages);
+          console.log('[Stream] Loaded messages from history endpoint:', loadedMessages);
+        } else {
+          // No messages found - empty thread or newly created
+          setMessages([]);
+          console.log('[Stream] No messages found for thread, showing empty state');
         }
       }
     } catch (error) {
@@ -121,6 +122,11 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
   // Load messages when thread or selected agent changes
   useEffect(() => {
     if (currentThreadId && appName) {
+      // Skip loading if we just auto-created a thread during sendMessage
+      if (skipNextLoadRef.current) {
+        skipNextLoadRef.current = false;
+        return;
+      }
       loadThreadMessages(currentThreadId);
     } else if (!currentThreadId) {
       setMessages([]);
@@ -141,12 +147,21 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
         return;
       }
 
+      // Capture user message count before sending (for summary trigger)
+      const prevUserMsgCount = messagesRef.current.filter(
+        (m) => m.message.messageType === 'user'
+      ).length;
+      const newUserMsgCount = prevUserMsgCount + 1;
+
       // Auto-create thread if none exists
       let activeThreadId = currentThreadId;
       if (!activeThreadId) {
         toast.info("Creating new thread...");
+        // Set flag to prevent the useEffect from wiping messages when currentThreadId changes
+        skipNextLoadRef.current = true;
         const newThread = await createThread();
         if (!newThread) {
+          skipNextLoadRef.current = false;
           toast.error("Failed to create thread");
           return;
         }
@@ -154,12 +169,23 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
       }
 
       // Add user message immediately - create proper UIMessage structure
+      // Collect image previews from content blocks so they render in the chat bubble
+      const imageBlocks = (contentBlocks || []).filter((b) => b.type === 'image');
+      const mediaForMessage = imageBlocks.map((block) => ({
+        mimeType: block.mime_type || 'image/jpeg',
+        // Both uploaded images (createObjectURL) and sample images have _previewUrl set
+        data: block.metadata?._previewUrl
+          ? String(block.metadata._previewUrl)
+          : String(block.data || ''),
+      }));
+
       const userUIMessage: UIMessage = {
         id: `user-${Date.now()}`,
         message: {
           messageType: 'user',
           content: content.trim(),
-          metadata: {}
+          metadata: {},
+          media: mediaForMessage,
         },
         timestamp: Date.now()
       };
@@ -174,25 +200,34 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
         const apiClient = createApiClient();
 
         // Start streaming - convert Message to UserMessage (with messageType for backend)
-        // Convert contentBlocks to MediaDTO[] for multimodal support
-        const mediaItems: MediaDTO[] = (contentBlocks || [])
-          .filter((block) => block.type === 'image' && block.data && block.mime_type)
-          .map((block) => ({
-            mimeType: block.mime_type!,
-            data: block.data!,
-          }));
+        // Extract original File from content blocks for multimodal upload
+        const imageBlock = (contentBlocks || []).find(
+          (block) => block.type === 'image' && block.metadata?._originalFile
+        );
+        const uploadFile: File | undefined = imageBlock?.metadata?._originalFile as File | undefined;
+        // Also check for sample image selection
+        const sampleId: string | undefined = (contentBlocks || []).find(
+          (block) => block.type === 'image' && block.metadata?._sampleId
+        )?.metadata?._sampleId as string | undefined;
 
-        // Route: multimodal (has images) → /api/chat/multimodal
+        // Route: multimodal (has image file or sample) → /api/chat/multimodal
         //        normal text        → /run_sse (Studio protocol)
-        if (mediaItems.length > 0) {
+        if (uploadFile || sampleId) {
           console.log('[Stream] Using multimodal endpoint for image upload');
 
-          const multimodalStream = apiClient.runMultimodalStream(
-            content.trim(),
-            activeThreadId,
-            mediaItems,
-            abortControllerRef.current.signal
-          );
+          const multimodalStream = sampleId
+            ? apiClient.runSampleImageStream(
+                content.trim(),
+                activeThreadId,
+                sampleId,
+                abortControllerRef.current.signal
+              )
+            : apiClient.runMultimodalStream(
+                content.trim(),
+                activeThreadId,
+                uploadFile!,
+                abortControllerRef.current.signal
+              );
 
           let isFirstChunk = true;
           for await (const chunk of multimodalStream) {
@@ -256,35 +291,10 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
 
             if (agentResponse.node === "heartbeat") continue;
 
-            if (agentResponse.chunk) {
-              if (isFirstChunk) {
-                const newAssistantMessage: UIMessage = {
-                  id: `assistant-${Date.now()}`,
-                  message: {
-                    messageType: 'assistant',
-                    content: agentResponse.chunk,
-                    metadata: {},
-                    toolCalls: []
-                  },
-                  timestamp: Date.now()
-                };
-                setMessages((prev) => [...prev, newAssistantMessage]);
-                isFirstChunk = false;
-              } else {
-                setMessages((prev) => {
-                  const newMessages = [...prev];
-                  const lastMessage = newMessages[newMessages.length - 1];
-                  newMessages[newMessages.length - 1] = {
-                    ...lastMessage,
-                    message: {
-                      ...lastMessage.message,
-                      content: lastMessage.message.content + agentResponse.chunk
-                    }
-                  };
-                  return newMessages;
-                });
-              }
-            } else if (agentResponse.message) {
+            // Check message first: when the Studio sends both chunk and message in the
+            // same final event, we treat the complete message as authoritative and ignore
+            // the chunk to prevent the content from being appended a second time.
+            if (agentResponse.message) {
               const backendMessage = fromMessageDTO(agentResponse.message);
               const messageType = agentResponse.message.messageType;
 
@@ -321,13 +331,59 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
                 setMessages((prev) => [...prev, newMessage]);
                 isFirstChunk = true;
               }
+            } else if (agentResponse.chunk) {
+              if (isFirstChunk) {
+                const newAssistantMessage: UIMessage = {
+                  id: `assistant-${Date.now()}`,
+                  message: {
+                    messageType: 'assistant',
+                    content: agentResponse.chunk,
+                    metadata: {},
+                    toolCalls: []
+                  },
+                  timestamp: Date.now()
+                };
+                setMessages((prev) => [...prev, newAssistantMessage]);
+                isFirstChunk = false;
+              } else {
+                setMessages((prev) => {
+                  const newMessages = [...prev];
+                  const lastMessage = newMessages[newMessages.length - 1];
+                  newMessages[newMessages.length - 1] = {
+                    ...lastMessage,
+                    message: {
+                      ...lastMessage.message,
+                      content: lastMessage.message.content + agentResponse.chunk
+                    }
+                  };
+                  return newMessages;
+                });
+              }
             }
           }
         }
 
         console.log('[Stream] Streaming complete');
-        // Streaming complete - messages are already updated in state
-        // Backend doesn't provide a separate API to fetch message history
+
+        // Trigger LLM summary every 5 user turns
+        if (newUserMsgCount % 5 === 0 && activeThreadId) {
+          const threadForSummary = activeThreadId;
+          setTimeout(async () => {
+            try {
+              const latestMessages = messagesRef.current;
+              const summaryMessages = latestMessages
+                .filter((m) => m.message.messageType === 'user' || m.message.messageType === 'assistant')
+                .map((m) => ({ role: m.message.messageType as string, content: m.message.content }));
+              if (summaryMessages.length > 0) {
+                const apiClient = createApiClient();
+                const summary = await apiClient.generateSummary(summaryMessages);
+                updateThreadSummary(threadForSummary, summary);
+              }
+            } catch (e) {
+              console.warn('[Stream] Summary generation failed:', e);
+            }
+          }, 300);
+        }
 
       } catch (error: any) {
         if (error.name === "AbortError") {
@@ -342,7 +398,7 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
         abortControllerRef.current = null;
       }
     },
-    [currentThreadId, createThread, appName, userId, mode, selectedGraph]
+    [currentThreadId, createThread, appName, userId, mode, selectedGraph, updateThreadSummary]
   );
 
   const clearMessages = useCallback(() => {
@@ -400,43 +456,10 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
             continue;
           }
 
-          // Use chunk for streaming updates if available
-          if (agentResponse.chunk) {
-            console.log('[Stream] Processing chunk:', agentResponse.chunk);
-
-            if (isFirstChunk) {
-              // Create new assistant message for first chunk
-              const newAssistantMessage: UIMessage = {
-                id: `assistant-${Date.now()}`,
-                message: {
-                  messageType: 'assistant',
-                  content: agentResponse.chunk,
-                  metadata: {},
-                  toolCalls: []
-                },
-                timestamp: Date.now()
-              };
-              setMessages((prev) => {
-                console.log('[Stream] Adding first chunk, prev messages:', prev.length);
-                return [...prev, newAssistantMessage];
-              });
-              isFirstChunk = false;
-            } else {
-              // Append chunk to existing content
-              setMessages((prev) => {
-                const newMessages = [...prev];
-                const lastMessage = newMessages[newMessages.length - 1];
-                newMessages[newMessages.length - 1] = {
-                  ...lastMessage,
-                  message: {
-                    ...lastMessage.message,
-                    content: lastMessage.message.content + agentResponse.chunk
-                  }
-                };
-                return newMessages;
-              });
-            }
-          } else if (agentResponse.message) {
+          // Check message first: when the Studio sends both chunk and message in the
+          // same final event, we treat the complete message as authoritative and ignore
+          // the chunk to prevent the content from being appended a second time.
+          if (agentResponse.message) {
             console.log('[Stream] Processing message:', agentResponse.message);
 
             const backendMessage = fromMessageDTO(agentResponse.message);
@@ -474,6 +497,41 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
               };
               setMessages((prev) => [...prev, newMessage]);
               isFirstChunk = true;
+            }
+          } else if (agentResponse.chunk) {
+            console.log('[Stream] Processing chunk:', agentResponse.chunk);
+
+            if (isFirstChunk) {
+              // Create new assistant message for first chunk
+              const newAssistantMessage: UIMessage = {
+                id: `assistant-${Date.now()}`,
+                message: {
+                  messageType: 'assistant',
+                  content: agentResponse.chunk,
+                  metadata: {},
+                  toolCalls: []
+                },
+                timestamp: Date.now()
+              };
+              setMessages((prev) => {
+                console.log('[Stream] Adding first chunk, prev messages:', prev.length);
+                return [...prev, newAssistantMessage];
+              });
+              isFirstChunk = false;
+            } else {
+              // Append chunk to existing content
+              setMessages((prev) => {
+                const newMessages = [...prev];
+                const lastMessage = newMessages[newMessages.length - 1];
+                newMessages[newMessages.length - 1] = {
+                  ...lastMessage,
+                  message: {
+                    ...lastMessage.message,
+                    content: lastMessage.message.content + agentResponse.chunk
+                  }
+                };
+                return newMessages;
+              });
             }
           }
         }

@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { useThreads } from "@/providers/Thread";
 import { Session } from "@/lib/spring-ai-api";
 import { useEffect } from "react";
+import { Trash2 } from "lucide-react";
 
 import { getContentString } from "../utils";
 import { useQueryState, parseAsBoolean } from "nuqs";
@@ -23,37 +24,53 @@ function ThreadList({
   onThreadClick?: (threadId: string) => void;
 }) {
   const [threadId, setThreadId] = useQueryState("threadId");
+  const { summaries, deleteThread } = useThreads();
 
   return (
     <div className="flex h-full w-full flex-col items-start justify-start gap-2 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">
       {threads.map((t) => {
-        let itemText = t.thread_id;
-        if (
-          typeof t.values === "object" &&
-          t.values &&
-          "messages" in t.values &&
-          Array.isArray(t.values.messages) &&
-          t.values.messages?.length > 0
-        ) {
-          const firstMessage = t.values.messages[0];
-          itemText = getContentString(firstMessage.content);
+        // Priority: LLM-generated summary > first message > thread_id
+        let itemText: string = summaries[t.thread_id] || t.thread_id;
+        if (!summaries[t.thread_id]) {
+          if (
+            typeof t.values === "object" &&
+            t.values &&
+            "messages" in t.values &&
+            Array.isArray(t.values.messages) &&
+            t.values.messages?.length > 0
+          ) {
+            const firstMessage = t.values.messages[0];
+            itemText = getContentString(firstMessage.content);
+          }
         }
+        const isActive = t.thread_id === threadId;
         return (
           <div
             key={t.thread_id}
-            className="w-full px-1"
+            className="group w-full px-1 flex items-center gap-1"
           >
             <Button
-              variant="ghost"
-              className="w-[280px] items-start justify-start text-left font-normal"
+              variant={isActive ? "secondary" : "ghost"}
+              className="flex-1 min-w-0 items-start justify-start text-left font-normal"
               onClick={(e) => {
                 e.preventDefault();
                 onThreadClick?.(t.thread_id);
-                if (t.thread_id === threadId) return;
+                if (isActive) return;
                 setThreadId(t.thread_id);
               }}
             >
               <p className="truncate text-ellipsis">{itemText}</p>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={(e) => {
+                e.stopPropagation();
+                deleteThread(t.thread_id);
+              }}
+            >
+              <Trash2 className="size-3.5 text-muted-foreground" />
             </Button>
           </div>
         );
@@ -79,7 +96,7 @@ export default function ThreadHistory() {
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
-    parseAsBoolean.withDefault(false),
+    parseAsBoolean.withDefault(true),
   );
   const [threadId] = useQueryState("threadId");
 

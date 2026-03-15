@@ -47,6 +47,9 @@ import {
   useArtifactContext,
 } from "./artifact";
 import { GraphVisualization } from "./GraphVisualization";
+import { SampleImagePicker } from "./SampleImagePicker";
+import { ImageIcon, LogOut } from "lucide-react";
+import { useAuth } from "@/providers/Auth";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -95,7 +98,7 @@ function OpenGitHubRepo() {
       <Tooltip>
         <TooltipTrigger asChild>
           <a
-            href="https://github.com/alibaba/spring-ai-alibaba/"
+            href="https://github.com/"
             target="_blank"
             className="flex items-center justify-center"
           >
@@ -222,7 +225,7 @@ export function Thread() {
   const [threadId, _setThreadId] = useQueryState("threadId");
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
-    parseAsBoolean.withDefault(false),
+    parseAsBoolean.withDefault(true),
   );
   const [hideToolCalls, setHideToolCalls] = useQueryState(
     "hideToolCalls",
@@ -240,7 +243,10 @@ export function Thread() {
     handlePaste,
   } = useFileUpload();
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
+  const [samplePickerOpen, setSamplePickerOpen] = useState(false);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
+
+  const { userId: authUserId, logout } = useAuth();
 
   const stream = useStreamContext();
   const messages = stream.messages;
@@ -345,6 +351,19 @@ export function Thread() {
     setContentBlocks([]);
   };
 
+  const handleSampleSelect = (sampleId: string, previewUrl: string, label: string) => {
+    setSamplePickerOpen(false);
+    // Create a content block with sample metadata for the Stream provider
+    const sampleBlock = {
+      type: "image" as const,
+      source_type: "base64" as const,
+      mime_type: "image/jpeg",
+      data: "", // no actual data needed - backend uses sampleId directly
+      metadata: { name: label, _sampleId: sampleId, _previewUrl: previewUrl },
+    };
+    setContentBlocks((prev: any[]) => [...prev.filter((b: any) => b.type !== "image"), sampleBlock]);
+  };
+
   const chatStarted = !!threadId || !!messages.length;
 
   // Check if current thread has a placeholder message (indicates message history loading not supported)
@@ -411,7 +430,7 @@ export function Thread() {
           )}
           {!chatStarted && (
             <div className="absolute top-0 left-0 z-10 flex w-full items-center justify-between gap-3 p-2 pl-4">
-              <div>
+              <div className="flex items-center gap-2">
                 {(!chatHistoryOpen || !isLargeScreen) && (
                   <Button
                     className="hover:bg-gray-100"
@@ -424,6 +443,14 @@ export function Thread() {
                       <PanelRightClose className="size-5" />
                     )}
                   </Button>
+                )}
+                {isLocked && (
+                  <Link href="/index.html" className="flex items-center gap-2">
+                    <ArrowLeft className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-xl font-semibold tracking-tight">
+                      <span className="text-green-600">Spring AI Alibaba</span> · {selectedAgent}
+                    </span>
+                  </Link>
                 )}
               </div>
               <div className="absolute top-2 right-4 flex items-center gap-3">
@@ -543,7 +570,18 @@ export function Thread() {
                     )}
                   </>
                 )}
-                <div className="flex items-center">
+                <div className="flex items-center gap-2">
+                  {authUserId && (
+                    <span className="text-xs text-muted-foreground">{authUserId}</span>
+                  )}
+                  <TooltipIconButton
+                    size="sm"
+                    tooltip="Logout"
+                    variant="ghost"
+                    onClick={logout}
+                  >
+                    <LogOut className="size-4" />
+                  </TooltipIconButton>
                   <OpenGitHubRepo />
                 </div>
                 <TooltipIconButton
@@ -682,7 +720,7 @@ export function Thread() {
                       />
 
                       <div className="flex items-center gap-6 p-2 pt-4">
-                        <div>
+                        <div className="hidden">
                           <div className="flex items-center space-x-2">
                             <Switch
                               id="render-tool-calls"
@@ -710,10 +748,19 @@ export function Thread() {
                           id="file-input"
                           type="file"
                           onChange={handleFileUpload}
-                          multiple
                           accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
                           className="hidden"
                         />
+                        <button
+                          type="button"
+                          onClick={() => setSamplePickerOpen(true)}
+                          className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
+                        >
+                          <ImageIcon className="size-5 text-gray-600" />
+                          <span className="text-sm text-gray-600">
+                            Sample Library
+                          </span>
+                        </button>
                         <Button
                           type="submit"
                           className="ml-auto shadow-md transition-all"
@@ -747,6 +794,11 @@ export function Thread() {
           </div>
         </div>
       </div>
+      <SampleImagePicker
+        open={samplePickerOpen}
+        onClose={() => setSamplePickerOpen(false)}
+        onSelect={handleSampleSelect}
+      />
     </div>
   );
 }

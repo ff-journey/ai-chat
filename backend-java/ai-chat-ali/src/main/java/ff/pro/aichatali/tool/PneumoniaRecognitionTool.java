@@ -32,16 +32,16 @@ public class PneumoniaRecognitionTool implements BiFunction<String, ToolContext,
 
     @Override
     public String apply(String input, ToolContext toolContext) {
-        // Try to get uploaded image from ToolContext metadata
-        String imageBase64 = null;
+        // Try to get uploaded image path from ToolContext metadata
+        String imagePath = null;
         if (toolContext != null && toolContext.getContext() != null) {
-            Object img = toolContext.getContext().get("uploaded_image_base64");
+            Object img = toolContext.getContext().get("uploaded_image_path");
             if (img != null) {
-                imageBase64 = img.toString();
+                imagePath = img.toString();
             }
         }
 
-        if (imageBase64 == null || imageBase64.isBlank()) {
+        if (imagePath == null || imagePath.isBlank()) {
             return "{\"error\": \"No chest X-ray image provided. Please upload an image for pneumonia detection.\"}";
         }
 
@@ -51,8 +51,7 @@ public class PneumoniaRecognitionTool implements BiFunction<String, ToolContext,
 
         try {
             Map<String, String> requestBody = Map.of(
-                    "image_base64", imageBase64,
-                    "image_format", "jpeg"
+                    "file_path", imagePath
             );
 
             HttpHeaders headers = new HttpHeaders();
@@ -64,12 +63,8 @@ public class PneumoniaRecognitionTool implements BiFunction<String, ToolContext,
 
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
                 JsonNode root = objectMapper.readTree(response.getBody());
-                JsonNode data = root.path("data");
-                String prediction = data.path("prediction").asText("UNKNOWN");
-                double confidence = data.path("confidence").asDouble(0.0);
-                return String.format(
-                        "Pneumonia detection result: %s (confidence: %.2f%%)",
-                        prediction, confidence * 100);
+
+                return root.toString();
             }
             return "CNN service returned unexpected response: " + response.getStatusCode();
         } catch (Exception e) {

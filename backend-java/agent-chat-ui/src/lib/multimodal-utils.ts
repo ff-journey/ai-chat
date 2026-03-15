@@ -1,7 +1,9 @@
 import type { Base64ContentBlock } from "@langchain/core/messages";
 import { toast } from "sonner";
 
-// Returns a Promise of a typed multimodal block for images or PDFs
+// Returns a typed multimodal block for images or PDFs.
+// Images use a temporary object URL for preview (no base64 conversion).
+// PDFs still use base64 since they need to be sent as data.
 export async function fileToContentBlock(
   file: File,
 ): Promise<Base64ContentBlock> {
@@ -20,19 +22,21 @@ export async function fileToContentBlock(
     return Promise.reject(new Error(`Unsupported file type: ${file.type}`));
   }
 
-  const data = await fileToBase64(file);
-
   if (supportedImageTypes.includes(file.type)) {
+    // Use an object URL for preview — avoids holding large base64 strings in memory.
+    // The actual file bytes are sent as multipart via _originalFile during upload.
+    const previewUrl = URL.createObjectURL(file);
     return {
       type: "image",
       source_type: "base64",
       mime_type: file.type,
-      data,
-      metadata: { name: file.name },
+      data: "",
+      metadata: { name: file.name, _originalFile: file, _previewUrl: previewUrl },
     };
   }
 
-  // PDF
+  // PDF: must be base64 for sending
+  const data = await fileToBase64(file);
   return {
     type: "file",
     source_type: "base64",

@@ -6,10 +6,21 @@ import { useSearchParams } from "next/navigation";
 import { createApiClient } from "@/lib/spring-ai-api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Bot, GitBranch, Loader2 } from "lucide-react";
+import { Bot, GitBranch, Loader2, LogOut } from "lucide-react";
 import { GitHubSVG } from "@/components/icons/github";
 import { AgentPageClient } from "@/app/agent/[agentName]/AgentPageClient";
 import { GraphPageClient } from "@/app/graph/[graphName]/GraphPageClient";
+import { AuthProvider, useAuth } from "@/providers/Auth";
+import { LoginPage } from "@/components/LoginPage";
+import { Toaster } from "@/components/ui/sonner";
+
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useAuth();
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
+  return <>{children}</>;
+}
 
 function SelectionPageContent(): React.ReactNode {
   const searchParams = useSearchParams();
@@ -67,13 +78,14 @@ function SelectionPageContent(): React.ReactNode {
     };
   }, []);
 
+  const { userId, logout } = useAuth();
+
   if (agentParam) {
     return <AgentPageClient agentName={agentParam} />;
   }
   if (graphParam) {
     return <GraphPageClient graphName={graphParam} />;
   }
-
   const isLoading = agentsLoading || graphsLoading;
   const hasAgents = agentList.length > 0;
   const hasGraphs = graphList.length > 0;
@@ -86,14 +98,28 @@ function SelectionPageContent(): React.ReactNode {
           <span className="text-lg font-semibold tracking-tight">
             <span className="text-green-600 italic">Spring AI Alibaba</span> Studio
           </span>
-          <a
-            href="https://github.com/alibaba/spring-ai-alibaba/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center text-muted-foreground hover:text-foreground"
-          >
-            <GitHubSVG width="24" height="24" />
-          </a>
+          <div className="flex items-center gap-3">
+            {userId && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">{userId}</span>
+                <button
+                  onClick={logout}
+                  className="flex items-center text-muted-foreground hover:text-foreground"
+                  title="Logout"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+            <a
+              href="https://github.com/alibaba/spring-ai-alibaba/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center text-muted-foreground hover:text-foreground"
+            >
+              <GitHubSVG width="24" height="24" />
+            </a>
+          </div>
         </div>
       </header>
 
@@ -183,12 +209,17 @@ function SelectionPageContent(): React.ReactNode {
 
 export default function SelectionPage(): React.ReactNode {
   return (
-    <Suspense fallback={
-      <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    }>
-      <SelectionPageContent />
-    </Suspense>
+    <AuthProvider>
+      <Toaster />
+      <Suspense fallback={
+        <div className="flex min-h-screen items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      }>
+        <AuthGate>
+          <SelectionPageContent />
+        </AuthGate>
+      </Suspense>
+    </AuthProvider>
   );
 }

@@ -10,6 +10,14 @@ import React, {
 import { createApiClient, Session } from '@/lib/spring-ai-api';
 import { toast } from 'sonner';
 
+function getAuthUserId(): string {
+  if (typeof window !== 'undefined') {
+    const stored = localStorage.getItem('auth_userId');
+    if (stored) return stored;
+  }
+  return process.env.NEXT_PUBLIC_USER_ID || 'user-001';
+}
+
 export type Mode = 'agent' | 'graph';
 
 interface ThreadContextType {
@@ -40,6 +48,9 @@ interface ThreadContextType {
   isNewlyCreatedThread: (threadId: string) => boolean;
   /** When true, mode/agent/graph are fixed from URL - hide selectors and show back link. */
   isLocked: boolean;
+  /** LLM-generated summaries keyed by thread_id, persisted in localStorage. */
+  summaries: Record<string, string>;
+  updateThreadSummary: (threadId: string, summary: string) => void;
 }
 
 const ThreadContext = createContext<ThreadContextType | undefined>(undefined);
@@ -60,8 +71,21 @@ interface ThreadProviderProps {
   initialLock?: LockedMode;
 }
 
+const SUMMARY_STORAGE_KEY = 'thread_summaries';
+
+function loadSummaries(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const stored = localStorage.getItem(SUMMARY_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+}
+
 export function ThreadProvider({ children, initialLock }: ThreadProviderProps) {
   const [threads, setThreads] = useState<Session[]>([]);
+  const [summaries, setSummaries] = useState<Record<string, string>>(loadSummaries);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [newlyCreatedThreadIds, setNewlyCreatedThreadIds] = useState<Set<string>>(new Set());
@@ -80,7 +104,7 @@ export function ThreadProvider({ children, initialLock }: ThreadProviderProps) {
   const [isGraphsLoading, setIsGraphsLoading] = useState(!initialLock);
 
   const isLocked = !!initialLock;
-  const userId = process.env.NEXT_PUBLIC_USER_ID || 'user-001';
+  const userId = getAuthUserId();
   const appName = mode === 'agent' ? selectedAgent : (selectedGraph ? `graph:${selectedGraph}` : '');
 
   // Fetch available agents on mount (skip when locked - we already have the agent/graph)
@@ -163,6 +187,16 @@ export function ThreadProvider({ children, initialLock }: ThreadProviderProps) {
     return newlyCreatedThreadIds.has(threadId);
   }, [newlyCreatedThreadIds]);
 
+  const updateThreadSummary = useCallback((threadId: string, summary: string) => {
+    setSummaries((prev) => {
+      const updated = { ...prev, [threadId]: summary };
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(SUMMARY_STORAGE_KEY, JSON.stringify(updated));
+      }
+      return updated;
+    });
+  }, []);
+
   const loadThreads = useCallback(async () => {
     if (mode === 'agent' && !selectedAgent) return;
     if (mode === 'graph' && !selectedGraph) return;
@@ -173,9 +207,10 @@ export function ThreadProvider({ children, initialLock }: ThreadProviderProps) {
         ? await apiClient.listGraphSessions(selectedGraph, userId)
         : await apiClient.listSessions(selectedAgent, userId);
 
-      const sortedSessions = sessions.sort(
-        (a, b) => a.thread_id.localeCompare(b.thread_id)
-      );
+      // Reverse the backend's insertion-order array to show newest threads first.
+      // UUIDs are not time-sortable, so we rely on the backend returning threads
+      // in creation order (oldest first) and simply reverse the list.
+      const sortedSessions = [...sessions].reverse();
 
       setThreads(sortedSessions);
     } catch (error: any) {
@@ -261,7 +296,9 @@ export function ThreadProvider({ children, initialLock }: ThreadProviderProps) {
     isAgentsLoading,
     isNewlyCreatedThread,
     isLocked,
-  }), [threads, currentThreadId, setCurrentThreadId, loadThreads, createThread, deleteThread, appName, userId, agentList, selectedAgent, setSelectedAgent, mode, setMode, graphList, selectedGraph, setSelectedGraph, isGraphsLoading, isLoading, isAgentsLoading, isNewlyCreatedThread, isLocked]);
+    summaries,
+    updateThreadSummary,
+  }), [threads, currentThreadId, setCurrentThreadId, loadThreads, createThread, deleteThread, appName, userId, agentList, selectedAgent, setSelectedAgent, mode, setMode, graphList, selectedGraph, setSelectedGraph, isGraphsLoading, isLoading, isAgentsLoading, isNewlyCreatedThread, isLocked, summaries, updateThreadSummary]);
 
   return (
     <ThreadContext.Provider value={contextValue}>

@@ -1,8 +1,7 @@
 import React from "react";
-import { File, Image as ImageIcon, X as XIcon } from "lucide-react";
+import { File, X as XIcon } from "lucide-react";
 import type { Base64ContentBlock } from "@langchain/core/messages";
 import { cn } from "@/lib/utils";
-import Image from "next/image";
 export interface MultimodalPreviewProps {
   block: Base64ContentBlock;
   removable?: boolean;
@@ -18,25 +17,24 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
   className,
   size = "md",
 }) => {
-  // Image block
+  // Image block (base64 or sample preview)
   if (
     block.type === "image" &&
-    block.source_type === "base64" &&
     typeof block.mime_type === "string" &&
     block.mime_type.startsWith("image/")
   ) {
-    const url = `data:${block.mime_type};base64,${block.data}`;
+    const url = block.metadata?._previewUrl
+      ? String(block.metadata._previewUrl)
+      : `data:${block.mime_type};base64,${block.data}`;
     let imgClass: string = "rounded-md object-cover h-16 w-16 text-lg";
     if (size === "sm") imgClass = "rounded-md object-cover h-10 w-10 text-base";
     if (size === "lg") imgClass = "rounded-md object-cover h-24 w-24 text-xl";
     return (
       <div className={cn("relative inline-block", className)}>
-        <Image
+        <img
           src={url}
           alt={String(block.metadata?.name || "uploaded image")}
           className={imgClass}
-          width={size === "sm" ? 16 : size === "md" ? 32 : 48}
-          height={size === "sm" ? 16 : size === "md" ? 32 : 48}
         />
         {removable && (
           <button

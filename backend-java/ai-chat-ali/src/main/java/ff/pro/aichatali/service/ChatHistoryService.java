@@ -15,8 +15,12 @@ public class ChatHistoryService {
     private final Map<String, List<MessageRecord>> history = new ConcurrentHashMap<>();
 
     public void addMessage(String threadId, String role, String content) {
+        addMessage(threadId, role, content, null);
+    }
+
+    public void addMessage(String threadId, String role, String content, String imageUrl) {
         history.computeIfAbsent(threadId, k -> Collections.synchronizedList(new ArrayList<>()))
-                .add(new MessageRecord(role, content, Instant.now().toString()));
+                .add(new MessageRecord(role, content, Instant.now().toString(), imageUrl));
     }
 
     public List<MessageRecord> getHistory(String threadId) {
@@ -27,6 +31,6 @@ public class ChatHistoryService {
         return history.keySet();
     }
 
-    public record MessageRecord(String role, String content, String timestamp) {}
+    public record MessageRecord(String role, String content, String timestamp, String imageUrl) {}
 
 }

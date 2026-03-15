@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'application'
     id 'org.springframework.boot' version '3.5.11'
     id 'io.spring.dependency-management' version '1.1.7'
 }
@@ -44,6 +45,9 @@ dependencies {
     implementation 'com.alibaba.cloud.ai:spring-ai-alibaba-starter-dashscope'
 
     implementation 'com.alibaba.cloud.ai:spring-ai-alibaba-studio:1.1.2.0'
+    // Source: https://mvnrepository.com/artifact/io.zipkin.reporter2/zipkin-reporter-brave
+//    implementation("io.zipkin.reporter2:zipkin-reporter-brave:3.5.1")
+    implementation 'org.springframework.ai:spring-ai-starter-model-openai'
 }
 
 tasks.named('test') {
@@ -113,6 +117,10 @@ task frontendClean(type: Delete) {
     delete staticChatuiDir, legacyChatuiDir
 }
 
+clean {
+    delete file("${projectDir}/ai-chat-boot")
+}
+
 task frontendCopy(type: Copy) {
     description = '复制前端构建产物到 Spring Boot 静态资源目录'
     group = 'frontend'
@@ -123,3 +131,85 @@ task frontendCopy(type: Copy) {
 
 // 让 processResources 依赖前端构建，这样 bootJar/bootRun 都会自动触发
 processResources.dependsOn frontendCopy
+
+// ============================================================
+// Application 插件配置（用于 dist 打包任务）
+// ============================================================
+application {
+    mainClass = 'ff.pro.aichatali.AiChatAliApplication'
+}
+
+// ============================================================
+// dist 打包任务：生成可独立部署的 ai-chat-boot/ 目录
+// 输出结构：
+//   ai-chat-boot/
+//     bin/ai-chat.sh   — 启动/停止脚本
+//     lib/ai-chat-boot.jar
+// ============================================================
+def distOutputDir = file("${rootDir}/ai-chat-boot")
+
+task dist {
+    description = '打包应用到 ai-chat-boot/ (lib/JAR + bin/启动脚本)'
+    group = 'distribution'
+    dependsOn bootJar
+
+    doLast {
+        def libDir  = file("${distOutputDir}/lib")
+        def binDir  = file("${distOutputDir}/bin")
+        libDir.mkdirs()
+        binDir.mkdirs()
+
+        // 复制 bootJar
+        def srcJar = bootJar.archiveFile.get().asFile
+        def dstJar = file("${libDir}/ai-chat-boot.jar")
+        java.nio.file.Files.copy(
+            srcJar.toPath(),
+            dstJar.toPath(),
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING
+        )
+
+        // 复制启动脚本（源文件: bin/ai-chat.sh）
+        def srcScript = file("${projectDir}/bin/ai-chat.sh")
+        def dstScript = file("${binDir}/ai-chat.sh")
+        java.nio.file.Files.copy(
+            srcScript.toPath(),
+            dstScript.toPath(),
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING
+        )
+        dstScript.setExecutable(true)
+        // 确保脚本为 Unix LF 行尾（Windows 上构建时 Write 工具可能写入 CRLF）
+        dstScript.text = dstScript.text.replace('\r\n', '\n').replace('\r', '\n')
+
+        // 复制 samples/ 目录（sample 图片识别功能依赖，路径相对于运行目录）
+        def srcSamples = file("${projectDir}/samples")
+        if (srcSamples.exists()) {
+            def dstSamples = file("${distOutputDir}/samples")
+            ant.copy(todir: dstSamples) {
+                ant.fileset(dir: srcSamples)
+            }
+            println "   samples/       (${srcSamples.listFiles()?.length ?: 0} categories)"
+        } else {
+            println "   [WARN] samples/ not found at ${srcSamples.path}, skipped"
+        }
+
+        // 复制 config/ 目录（外部配置，Spring Boot 自动加载，可覆盖 JAR 内配置）
+        def srcConfig = file("${projectDir}/config")
+        if (srcConfig.exists()) {
+            def dstConfig = file("${distOutputDir}/config")
+            ant.copy(todir: dstConfig) {
+                ant.fileset(dir: srcConfig)
+            }
+            println "   config/        (${srcConfig.listFiles()?.length ?: 0} files)"
+        } else {
+            println "   [WARN] config/ not found at ${srcConfig.path}, skipped"
+        }
+
+        println "=========================================="
+        println " dist 打包完成: ${distOutputDir.absolutePath}"
+        println "   lib/ai-chat-boot.jar"
+        println "   bin/ai-chat.sh"
+        println "   config/          ← 外部配置，可覆盖 JAR 内 application.yml"
+        println "   samples/         ← sample 图片"
+        println "=========================================="
+    }
+}

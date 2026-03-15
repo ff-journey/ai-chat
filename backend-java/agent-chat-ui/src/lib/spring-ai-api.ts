@@ -149,6 +149,17 @@ export interface ApiResponse<T> {
   requestId?: string;
 }
 
+export interface SampleImage {
+  filename: string;
+  label: string;
+}
+
+export interface SampleCategory {
+  category: string;
+  label: string;
+  images: SampleImage[];
+}
+
 class SpringAIApiClient {
   private baseUrl: string;
 
@@ -554,18 +565,23 @@ class SpringAIApiClient {
     }
   }
 
-  // Multimodal endpoint: sends message + images to /api/chat/multimodal
+  // Multimodal endpoint: sends file + message to /api/chat/multimodal via FormData
   // Returns plain-text SSE chunks (not JSON AgentRunResponse)
   async *runMultimodalStream(
     message: string,
     threadId: string,
-    media: MediaDTO[],
+    file: File,
     signal?: AbortSignal
   ): AsyncGenerator<string, void, unknown> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('message', message);
+    formData.append('threadId', threadId);
+
     const response = await fetch(`${this.baseUrl}/api/chat/multimodal`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify({ message, threadId, media }),
+      headers: { Accept: 'text/event-stream' },
+      body: formData,
       signal,
     });
 
@@ -595,6 +611,90 @@ class SpringAIApiClient {
     } finally {
       reader.releaseLock();
     }
+  }
+
+  // Multimodal with sample image: sends sampleId + message to /api/chat/multimodal/sample
+  async *runSampleImageStream(
+    message: string,
+    threadId: string,
+    sampleId: string,
+    signal?: AbortSignal
+  ): AsyncGenerator<string, void, unknown> {
+    const params = new URLSearchParams({ message, threadId, sampleId });
+    const response = await fetch(`${this.baseUrl}/api/chat/multimodal/sample?${params}`, {
+      method: 'POST',
+      headers: { Accept: 'text/event-stream' },
+      signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to run sample image stream: ${response.statusText}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('Response body is not readable');
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('data:')) {
+            const data = line.slice(5);
+            if (data) yield data;
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  // Fetch available sample images
+  async listSampleImages(): Promise<SampleCategory[]> {
+    const response = await fetch(`${this.baseUrl}/api/samples`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch sample images: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  // Get sample image URL for preview
+  getSampleImageUrl(category: string, filename: string): string {
+    return `${this.baseUrl}/api/samples/${encodeURIComponent(category)}/${encodeURIComponent(filename)}`;
+  }
+
+  // 获取会话消息历史 (从 MemorySaver / ChatHistoryService)
+  async getThreadHistory(threadId: string, appName?: string): Promise<{ messageType: string; content: string }[]> {
+    const params = new URLSearchParams();
+    if (appName) params.set('appName', appName);
+    const query = params.toString() ? `?${params}` : '';
+    const response = await fetch(
+      `${this.baseUrl}/api/chat/history/${encodeURIComponent(threadId)}${query}`
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to fetch thread history: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  // 生成对话摘要 (每5轮触发，由LLM总结)
+  async generateSummary(messages: Array<{ role: string; content: string }>): Promise<string> {
+    const response = await fetch(`${this.baseUrl}/api/chat/summary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to generate summary: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data.summary || 'New Conversation';
   }
 
   // 获取会话追踪信息

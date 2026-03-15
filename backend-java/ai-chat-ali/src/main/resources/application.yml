@@ -1,20 +1,38 @@
 server:
-    port: 8080
+  port: 8080
 spring:
-    ai:
-        dashscope:
-            api-key: ${AI_DASHSCOPE_API_KEY}
-            chat:
-                options:
-                    model: qwen-turbo
-    application:
-        name: ai-chat-ali
+  ai:
+    dashscope:
+      api-key: ${AI_DASHSCOPE_API_KEY}
+      chat:
+        options:
+          model: qwen-turbo
+    openai:
+      api-key: EMPTY
+      base-url: http://localhost:9901
+      chat:
+        options:
+          model: qwen3-medical
+          temperature: 0.3
+  application:
+    name: ai-chat-ali
+
+
+app:
+  upload:
+    dir: uploads
+  samples:
+    dir: samples
 
 medical:
-    cnn:
-        url: http://localhost:5000/api/pneumonia/predict
-        enabled: true
-    vllm:
-        url: http://localhost:8000/v1/chat/completions
-        model: qwen3-0.6b
-        enabled: true
+  cnn:
+    url: http://localhost:9801/api/pneumonia/predict
+    enabled: true
+  vllm:
+    url: http://localhost:9901/v1/chat/completions
+    model: qwen3-0.6b
+    enabled: true
+
+logging:
+  level:
+    org.springframework.ai: DEBUG

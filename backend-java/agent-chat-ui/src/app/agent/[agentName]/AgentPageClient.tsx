@@ -6,9 +6,29 @@ import { StreamProvider } from "@/providers/Stream";
 import { ThreadProvider } from "@/providers/Thread";
 import { ArtifactProvider } from "@/components/thread/artifact";
 import { Toaster } from "@/components/ui/sonner";
+import { AuthProvider, useAuth } from "@/providers/Auth";
+import { LoginPage } from "@/components/LoginPage";
 
 interface AgentPageClientProps {
   agentName: string;
+}
+
+function AgentPageInner({ agentName }: AgentPageClientProps) {
+  const { isAuthenticated } = useAuth();
+
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
+
+  return (
+    <ThreadProvider initialLock={{ mode: "agent", agent: agentName }}>
+      <StreamProvider>
+        <ArtifactProvider>
+          <Thread />
+        </ArtifactProvider>
+      </StreamProvider>
+    </ThreadProvider>
+  );
 }
 
 export function AgentPageClient({ agentName }: AgentPageClientProps) {
@@ -22,14 +42,10 @@ export function AgentPageClient({ agentName }: AgentPageClientProps) {
 
   return (
     <React.Suspense fallback={<div>Loading...</div>}>
-      <Toaster />
-      <ThreadProvider initialLock={{ mode: "agent", agent: agentName }}>
-        <StreamProvider>
-          <ArtifactProvider>
-            <Thread />
-          </ArtifactProvider>
-        </StreamProvider>
-      </ThreadProvider>
+      <AuthProvider>
+        <Toaster />
+        <AgentPageInner agentName={agentName} />
+      </AuthProvider>
     </React.Suspense>
   );
 }
