@@ -341,14 +341,15 @@ export function Thread() {
 
     // Default message when only images are uploaded
     if (!messageContent && hasImageBlocks) {
-      messageContent = "Please analyze the uploaded image.";
+      messageContent = "我拍了胸部x光, 帮我看下是否有问题";
     }
+
+    // Reset input immediately before waiting for response
+    setInput("");
+    setContentBlocks([]);
 
     // Send message with file content blocks for multimodal support
     await stream.sendMessage(messageContent, contentBlocks);
-
-    setInput("");
-    setContentBlocks([]);
   };
 
   const handleSampleSelect = (sampleId: string, previewUrl: string, label: string) => {

@@ -91,12 +91,14 @@ async def predict(request: PredictRequest):
             # 二分类：sigmoid输出概率
             confidence = torch.softmax(output, dim=1)
 
-        result_dict = {
-            CLASS_NAMES[i]: round(confidence[0][i].item(), 4) for i in range(len(CLASS_NAMES))
-        }
+        confidences = {CLASS_NAMES[i]: round(confidence[0][i].item(), 4) for i in range(len(CLASS_NAMES))}
+        best_class = max(confidences, key=confidences.get)
+        best_conf = confidences[best_class]
 
-        # ex: {"正常": 0.9999, "新冠肺炎": 0.0001}
-        return result_dict
+        if best_conf < 0.7:
+            return {"result": "无法识别肺炎分类", "confidence": best_conf}
+
+        return {"result": best_class, "confidence": best_conf}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"预测失败：{str(e)}")

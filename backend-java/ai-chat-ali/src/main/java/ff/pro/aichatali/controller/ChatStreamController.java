@@ -12,6 +12,7 @@ import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import ff.pro.aichatali.service.ChatHistoryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -100,7 +101,15 @@ public class ChatStreamController {
                        @RequestParam(defaultValue = "default") String threadId) throws Exception {
         RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
         chatHistoryService.addMessage(threadId, "user", message);
-        String result = supervisorAgent.call(message, config).getText();
+        String result = supervisorAgent.stream(message, config)
+                .filter(output -> output instanceof StreamingOutput)
+                .map(output -> {
+                    StreamingOutput so = (StreamingOutput) output;
+                    return so.getOutputType() == OutputType.AGENT_MODEL_STREAMING ? so.message().getText() : "";
+                })
+                .filter(text -> !text.isEmpty())
+                .reduce("", String::concat)
+                .block();
         chatHistoryService.addMessage(threadId, "assistant", result);
         return result;
     }
@@ -123,8 +132,11 @@ public class ChatStreamController {
                 .addMetadata("uploaded_image_path", savedPath)
                 .build();
 
+        String imgSignal = "[用户已上传胸部X光图片，请进行肺炎影像分析]";
         if (message == null || message.isBlank()) {
-            message = "Please analyze the uploaded image.";
+            message = imgSignal;
+        } else {
+            message = message + "\n" + imgSignal;
         }
 
         chatHistoryService.addMessage(threadId, "user", message, imageUrl);
@@ -179,9 +191,13 @@ public class ChatStreamController {
                 .addMetadata("uploaded_image_path", absolutePath)
                 .build();
 
+        String imgSignal = "[用户已上传胸部X光图片，请进行肺炎影像分析]";
         if (message == null || message.isBlank()) {
-            message = "Please analyze the uploaded image.";
+            message = "我拍了胸部x光, 帮我看下是否有问题\n" + imgSignal;
+        } else {
+            message = message + "\n" + imgSignal;
         }
+
 
         // Encode sampleId path components so URLs with spaces remain valid
         String sampleImageUrl = "/samples/" + Arrays.stream(sampleId.split("/"))
@@ -324,7 +340,7 @@ public class ChatStreamController {
 
         String promptText = "请用一句话（15字以内）总结以下对话的核心主题，作为对话标题，只输出标题文字，不加引号或其他任何内容：\n" + conv;
         try {
-            String summary = chatModel.call(new Prompt(promptText))
+            String summary = chatModel.call(new Prompt(promptText, DashScopeChatOptions.builder().enableThinking(false).build()))
                     .getResult().getOutput().getText().trim();
             return ResponseEntity.ok(Map.of("summary", summary));
         } catch (Exception e) {

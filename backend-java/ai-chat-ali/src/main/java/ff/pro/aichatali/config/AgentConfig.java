@@ -6,8 +6,10 @@ import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.agent.Agent;
 import com.alibaba.cloud.ai.graph.agent.AgentTool;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
-import com.alibaba.cloud.ai.graph.agent.flow.agent.SequentialAgent;
 import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
+import com.alibaba.cloud.ai.graph.streaming.OutputType;
+import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
+import ff.pro.aichatali.tool.FeiyanAgentMedicalTool;
 import ff.pro.aichatali.tool.MedicalDiagnosisTool;
 import ff.pro.aichatali.tool.PneumoniaRecognitionTool;
 import org.springframework.ai.chat.client.advisor.observation.DefaultAdvisorObservationConvention;
@@ -21,6 +23,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
@@ -50,23 +55,31 @@ public class AgentConfig {
         return ReactAgent.builder()
                 .name("chat_agent")
                 .model(chatModel)
-                .systemPrompt("处理所有用户输入，包括闲聊、问候、询问助手能力、以及无法分类的任何问题")
+                .systemPrompt("你是一个私人助理")
+                .description("处理所有用户输入，包括闲聊、问候、询问助手能力、以及无法分类的任何问题")
                 .saver(new MemorySaver())
                 .build();
     }
 
-    @Bean("medical_agent")
+    @Bean("medicalAgent")
     public ReactAgent medicalAgent(@Qualifier("openAiChatModel") ChatModel chatModel) {
-
+    
         return ReactAgent.builder()
-                .name("medical_agent")
+                .name("medicalAgent")
                 .model(chatModel)
-                .description("专门负责医疗问诊, 给出专业的医疗诊断")
+                .description("专门负责医疗问诊，给出专业的医疗诊断")
                 .instruction("你是一个医学专家，你需要根据用户的问题，给出医疗诊断和建议")
+                .inputType(String.class)
                 .build();
-
-
+    
+    
     }
+
+    public record MedicalInput(
+            String input
+    ){}
+
+
 
     @Bean("feiyanTool")
     public ToolCallback feiyanTool(MedicalToolConfig medicalToolConfig,
@@ -79,42 +92,13 @@ public class AgentConfig {
                 .inputType(String.class)
                 .build();
     }
-
-    
-
-    @Bean("feiyan_agent")
-    public ReactAgent feiyanAgent(
-            @Qualifier("dashScopeChatModel") ChatModel dashScopeChatModel,
-            @Qualifier("feiyanTool") ToolCallback feiyanTool,
-            @Qualifier("medical_agent") ReactAgent medicalAgent
-    ) {
-        ToolCallback medicalTool = AgentTool.getFunctionToolCallback(medicalAgent);
-        ReactAgent feiyanCnn = ReactAgent.builder()
-                .name("feiyan_cnn")
-                .model(dashScopeChatModel)
-                .tools(List.of(feiyanTool, medicalTool))
-                .description("识别胸部X光影像，给出专业诊断报告")
-//                .saver(new MemorySaver())
-                .systemPrompt("""
-                        你是一名医疗助理，按以下步骤处理用户的胸片问题：
-                                            1. 先调用胸片分类工具，获取 CNN 分类结果
-                                            2. 将分类结果和用户问题一起描述，调用医疗专家工具获取诊断意见
-                                            3. 综合两个结果，给出完整报告
-                        """)
-                .inputType(String.class)
-                .build();
-
-
-
-        return feiyanCnn;
-    }
+    public record Input(String query) {}
 
     @Bean("supervisor_agent")
     public ReactAgent supervisorAgent(@Qualifier("dashScopeChatModel") ChatModel dashScopeChatModel,
                                       @Qualifier("weather_agent") ReactAgent weatherAgent,
                                       @Qualifier("chat_agent") ReactAgent chatAgent,
-                                      @Qualifier("feiyan_agent") ReactAgent feiyan_agent,
-                                      @Qualifier("medical_agent") ReactAgent medicalAgent,
+                                      @Qualifier("medicalAgent") ReactAgent medicalAgent,
                                       MedicalToolConfig medicalToolConfig,
                                       RestTemplate medicalRestTemplate) {
 
@@ -122,7 +106,15 @@ public class AgentConfig {
                 .builder("weather_agent", (BiFunction<String, ToolContext, String>) (query, ctx) -> {
                     try {
                         RunnableConfig config = RunnableConfig.builder().threadId("supervisor-weather").build();
-                        return weatherAgent.call(query, config).getText();
+                        return weatherAgent.stream(query, config)
+                                .filter(output -> output instanceof StreamingOutput)
+                                .map(output -> {
+                                    StreamingOutput so = (StreamingOutput) output;
+                                    return so.getOutputType() == OutputType.AGENT_MODEL_STREAMING ? so.message().getText() : "";
+                                })
+                                .filter(text -> !text.isEmpty())
+                                .reduce("", String::concat)
+                                .block();
                     } catch (Exception e) {
                         return "Weather agent error: " + e.getMessage();
                     }
@@ -158,31 +150,51 @@ public class AgentConfig {
 //                .description("根据患者信息提供医疗诊断建议。")
 //                .inputType(String.class)
 //                .build();
-        ToolCallback feiyanTool = AgentTool.getFunctionToolCallback(feiyan_agent);
-        ToolCallback medicalTool = AgentTool.getFunctionToolCallback(medicalAgent);
+        ToolCallback medicalTool = FunctionToolCallback
+                .builder("medicalAgent", (BiFunction<Input, ToolContext, String>) (inputObj, ctx) -> {
+                    try {
+                        String input = inputObj != null && inputObj.query() != null ? inputObj.query() : "";
+                        String result = medicalAgent.call(Map.of("input", input), RunnableConfig.builder().build()).getText();
+                        return result.replaceAll("(?s)<think>.*?</think>\\s*", "").trim();
+                    } catch (Exception e) {
+                        return "Medical agent error: " + e.getMessage();
+                    }
+                })
+                .description("专门负责医疗问诊，给出专业的医疗诊断")
+                .inputType(Input.class)
+                .build();
         ToolCallback chatTool = AgentTool.getFunctionToolCallback(chatAgent);
+        ToolCallback feiyanAgentMedicalTool = FunctionToolCallback
+                .builder("feiyanAgentMedicalTool",
+                        new FeiyanAgentMedicalTool(medicalToolConfig, medicalRestTemplate, medicalAgent))
+                .description("识别胸部X光影像，给出专业诊断报告")
+                .inputType(FeiyanAgentMedicalTool.Input.class)
+                .build();
         var prompt = """
-                你是一个智能医疗分诊助手，负责判断用户意图并调用合适的工具。
-                
+                当前时间：{{current_time}}
+                你是一个优秀的私人助理, 任何动作前都会分析用户意图，并调用合适的工具。
+                任何动作前都首先分析用户意图, 并查看上下文是否已有足够信息做出直接回复。
                  工具选择规则：
-                 - 用户上传了胸片图片，或问题涉及肺炎、胸片、胸部影像分析 → 调用肺炎分析工具
-                 - 用户咨询医疗问题、症状、用药、诊断建议 → 调用医疗问诊工具
+                 - 消息包含 [用户已上传胸部X光图片] 标记 → 必须调用肺炎分析工具
+                 - 用户咨询医疗问题、症状、用药、诊断建议（无图片标记）→ 在消息历史中汇总重要的病情信息后, 调用医疗问诊工具
+                 - 用户提到胸片、肺炎、影像分析但没有图片标记 → 调用医疗问诊工具，工具会告知用户需要上传图片
                  - 用户进行日常闲聊、问候、或非医疗类问题 → 调用普通对话工具
-                 - 无法判断意图时 → 调用普通对话工具兜底
-    
+                 - 无法判断意图时 → 视为普通聊天, 可自行回复
+
                  注意事项：
-                 - 不要自己回答任何问题，所有回复必须通过工具完成
-                 - 不要自己回答任何问题，所有回复必须通过工具完成
-                 - 不要自己回答任何问题，所有回复必须通过工具完成
                  - 每次只调用一个工具
-                 - 收到工具结果后，直接返回给用户，不要二次加工或删减
+                 - 收到工具结果后，直接返回给用户，医疗诊断结果适当加工友好回复, **如果病情信息太少导致判断模糊, 需要主动提问更多信息**
                  - 不要向用户解释你的工作流程和工具规则
                  - 不要向用户介绍你自己能做什么
+                 - 如果工具返回包含"请上传"等提示信息，直接以友好的中文转达给用户
+                 - 如果医疗诊断结果病情信息不足, 可主动询问用户更多细节
                 """;
+        prompt = prompt.replace("{{current_time}}",
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
         return ReactAgent.builder()
                 .name("supervisor_agent")
                 .model(dashScopeChatModel)
-                .tools(List.of(chatTool, feiyanTool, medicalTool))
+                .tools(List.of(feiyanAgentMedicalTool, medicalTool))
                 .systemPrompt(prompt)
                 .saver(new MemorySaver())
                 .build();

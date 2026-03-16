@@ -311,12 +311,12 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
                   setMessages((prev) => {
                     const newMessages = [...prev];
                     const lastMessage = newMessages[newMessages.length - 1];
-                    const updatedContent = backendMessage.content || lastMessage.message.content;
+                    // message is authoritative — replace accumulated streaming content entirely
                     newMessages[newMessages.length - 1] = {
                       ...lastMessage,
                       message: {
                         ...backendMessage,
-                        content: updatedContent
+                        content: backendMessage.content || lastMessage.message.content
                       }
                     };
                     return newMessages;
@@ -476,14 +476,14 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
                 isFirstChunk = false;
               } else {
                 setMessages((prev) => {
+                  // message is authoritative — replace accumulated streaming content entirely
                   const newMessages = [...prev];
                   const lastMessage = newMessages[newMessages.length - 1];
-                  const updatedContent = backendMessage.content || lastMessage.message.content;
                   newMessages[newMessages.length - 1] = {
                     ...lastMessage,
                     message: {
                       ...backendMessage,
-                      content: updatedContent
+                      content: backendMessage.content || lastMessage.message.content
                     }
                   };
                   return newMessages;

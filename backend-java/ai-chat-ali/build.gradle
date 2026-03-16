@@ -31,11 +31,12 @@ tasks.withType(JavaExec).configureEach {
 }
 
 dependencies {
-//    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
 //    testImplementation 'org.springframework.boot:spring-boot-starter-webflux-test'
     implementation 'org.springframework.boot:spring-boot-starter-web'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     implementation platform('com.alibaba.cloud.ai:spring-ai-alibaba-bom:1.1.2.0')
     implementation platform('org.springframework.ai:spring-ai-bom:1.1.2')

@@ -6,7 +6,7 @@ spring:
       api-key: ${AI_DASHSCOPE_API_KEY}
       chat:
         options:
-          model: qwen-turbo
+          model: qwen3-max
     openai:
       api-key: EMPTY
       base-url: http://localhost:9901
@@ -14,6 +14,7 @@ spring:
         options:
           model: qwen3-medical
           temperature: 0.3
+        completions-path: /v1/chat/completions
   application:
     name: ai-chat-ali
 
