@@ -284,6 +284,10 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
               );
 
           let isFirstChunk = true;
+          // Tracks the messageType of the last message we created/updated.
+          // Used to avoid appending chunks to non-assistant messages (e.g. tool-request)
+          // and to detect supervisor pass-through duplicates.
+          let activeMessageType: string | null = null;
           console.log('[Stream] Starting to process agent responses...');
 
           for await (const agentResponse of stream) {
@@ -291,37 +295,117 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
 
             if (agentResponse.node === "heartbeat") continue;
 
-            // Check message first: when the Studio sends both chunk and message in the
-            // same final event, we treat the complete message as authoritative and ignore
-            // the chunk to prevent the content from being appended a second time.
             if (agentResponse.message) {
               const backendMessage = fromMessageDTO(agentResponse.message);
               const messageType = agentResponse.message.messageType;
+              const finishReason = (agentResponse.message.metadata as Record<string, string>)?.finishReason;
 
-              if (messageType === 'assistant' || messageType === 'tool-request') {
-                if (isFirstChunk) {
-                  const newMessage: UIMessage = {
-                    id: `${messageType}-${Date.now()}`,
-                    message: backendMessage,
-                    timestamp: Date.now()
-                  };
-                  setMessages((prev) => [...prev, newMessage]);
-                  isFirstChunk = false;
-                } else {
-                  setMessages((prev) => {
-                    const newMessages = [...prev];
-                    const lastMessage = newMessages[newMessages.length - 1];
-                    // message is authoritative — replace accumulated streaming content entirely
-                    newMessages[newMessages.length - 1] = {
-                      ...lastMessage,
+              if (messageType === 'assistant') {
+                if (agentResponse.chunk && !finishReason) {
+                  // Streaming token: both chunk and message present, no finishReason.
+                  // message.content is only the current token — APPEND chunk.
+                  if (isFirstChunk || activeMessageType !== 'assistant') {
+                    const newAssistantMessage: UIMessage = {
+                      id: `assistant-${Date.now()}`,
                       message: {
-                        ...backendMessage,
-                        content: backendMessage.content || lastMessage.message.content
-                      }
+                        messageType: 'assistant',
+                        content: agentResponse.chunk,
+                        metadata: {},
+                        toolCalls: []
+                      },
+                      timestamp: Date.now()
                     };
-                    return newMessages;
-                  });
+                    setMessages((prev) => [...prev, newAssistantMessage]);
+                    isFirstChunk = false;
+                    activeMessageType = 'assistant';
+                  } else {
+                    setMessages((prev) => {
+                      const newMessages = [...prev];
+                      const lastMessage = newMessages[newMessages.length - 1];
+                      newMessages[newMessages.length - 1] = {
+                        ...lastMessage,
+                        message: {
+                          ...lastMessage.message,
+                          content: lastMessage.message.content + agentResponse.chunk
+                        }
+                      };
+                      return newMessages;
+                    });
+                  }
+                } else if (finishReason === 'STOP') {
+                  if (!backendMessage.content) {
+                    // Empty STOP signal — skip
+                    continue;
+                  }
+                  // Final authoritative full content — replace active streaming message or add new
+                  if (activeMessageType === 'assistant') {
+                    setMessages((prev) => {
+                      const newMessages = [...prev];
+                      const lastMessage = newMessages[newMessages.length - 1];
+                      newMessages[newMessages.length - 1] = {
+                        ...lastMessage,
+                        message: backendMessage
+                      };
+                      return newMessages;
+                    });
+                  } else {
+                    // No active streaming message — duplicate check then add
+                    const lastAssistantContent = messagesRef.current
+                      .filter(m => m.message.messageType === 'assistant')
+                      .at(-1)?.message.content;
+                    if (backendMessage.content && lastAssistantContent === backendMessage.content) {
+                      continue;
+                    }
+                    const newMessage: UIMessage = {
+                      id: `assistant-${Date.now()}`,
+                      message: backendMessage,
+                      timestamp: Date.now()
+                    };
+                    setMessages((prev) => [...prev, newMessage]);
+                    isFirstChunk = false;
+                    activeMessageType = 'assistant';
+                  }
+                } else {
+                  // Message-only event (no chunk), no finishReason — non-streaming complete message
+                  if (isFirstChunk || activeMessageType !== 'assistant') {
+                    const lastAssistantContent = messagesRef.current
+                      .filter(m => m.message.messageType === 'assistant')
+                      .at(-1)?.message.content;
+                    if (backendMessage.content && lastAssistantContent === backendMessage.content) {
+                      continue;
+                    }
+                    const newMessage: UIMessage = {
+                      id: `assistant-${Date.now()}`,
+                      message: backendMessage,
+                      timestamp: Date.now()
+                    };
+                    setMessages((prev) => [...prev, newMessage]);
+                    isFirstChunk = false;
+                    activeMessageType = 'assistant';
+                  } else {
+                    setMessages((prev) => {
+                      const newMessages = [...prev];
+                      const lastMessage = newMessages[newMessages.length - 1];
+                      newMessages[newMessages.length - 1] = {
+                        ...lastMessage,
+                        message: {
+                          ...backendMessage,
+                          content: backendMessage.content || lastMessage.message.content
+                        }
+                      };
+                      return newMessages;
+                    });
+                  }
                 }
+              } else if (messageType === 'tool-request') {
+                const newMessage: UIMessage = {
+                  id: `tool-request-${Date.now()}`,
+                  message: backendMessage,
+                  timestamp: Date.now()
+                };
+                setMessages((prev) => [...prev, newMessage]);
+                isFirstChunk = true;
+                activeMessageType = 'tool-request';
               } else if (messageType === 'tool-confirm' || messageType === 'tool') {
                 const newMessage: UIMessage = {
                   id: `${messageType}-${Date.now()}`,
@@ -330,9 +414,11 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
                 };
                 setMessages((prev) => [...prev, newMessage]);
                 isFirstChunk = true;
+                activeMessageType = messageType;
               }
             } else if (agentResponse.chunk) {
-              if (isFirstChunk) {
+              // Chunk-only event (no message object)
+              if (isFirstChunk || activeMessageType !== 'assistant') {
                 const newAssistantMessage: UIMessage = {
                   id: `assistant-${Date.now()}`,
                   message: {
@@ -345,6 +431,7 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
                 };
                 setMessages((prev) => [...prev, newAssistantMessage]);
                 isFirstChunk = false;
+                activeMessageType = 'assistant';
               } else {
                 setMessages((prev) => {
                   const newMessages = [...prev];
@@ -445,50 +532,124 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
             );
 
         let isFirstChunk = true;
+        let activeMessageType: string | null = null;
         console.log('[Stream] Starting to process resume agent responses...');
 
         for await (const agentResponse of stream) {
           console.log('[Stream] Received agent response:', agentResponse);
 
-          // Skip heartbeat messages
           if (agentResponse.node === "heartbeat") {
             console.log('[Stream] Skipping heartbeat message');
             continue;
           }
 
-          // Check message first: when the Studio sends both chunk and message in the
-          // same final event, we treat the complete message as authoritative and ignore
-          // the chunk to prevent the content from being appended a second time.
           if (agentResponse.message) {
-            console.log('[Stream] Processing message:', agentResponse.message);
-
             const backendMessage = fromMessageDTO(agentResponse.message);
             const messageType = agentResponse.message.messageType;
+            const finishReason = (agentResponse.message.metadata as Record<string, string>)?.finishReason;
 
-            if (messageType === 'assistant' || messageType === 'tool-request') {
-              if (isFirstChunk) {
-                const newMessage: UIMessage = {
-                  id: `${messageType}-${Date.now()}`,
-                  message: backendMessage,
-                  timestamp: Date.now()
-                };
-                setMessages((prev) => [...prev, newMessage]);
-                isFirstChunk = false;
-              } else {
-                setMessages((prev) => {
-                  // message is authoritative — replace accumulated streaming content entirely
-                  const newMessages = [...prev];
-                  const lastMessage = newMessages[newMessages.length - 1];
-                  newMessages[newMessages.length - 1] = {
-                    ...lastMessage,
+            if (messageType === 'assistant') {
+              if (agentResponse.chunk && !finishReason) {
+                // Streaming token: APPEND chunk
+                if (isFirstChunk || activeMessageType !== 'assistant') {
+                  const newAssistantMessage: UIMessage = {
+                    id: `assistant-${Date.now()}`,
                     message: {
-                      ...backendMessage,
-                      content: backendMessage.content || lastMessage.message.content
-                    }
+                      messageType: 'assistant',
+                      content: agentResponse.chunk,
+                      metadata: {},
+                      toolCalls: []
+                    },
+                    timestamp: Date.now()
                   };
-                  return newMessages;
-                });
+                  setMessages((prev) => [...prev, newAssistantMessage]);
+                  isFirstChunk = false;
+                  activeMessageType = 'assistant';
+                } else {
+                  setMessages((prev) => {
+                    const newMessages = [...prev];
+                    const lastMessage = newMessages[newMessages.length - 1];
+                    newMessages[newMessages.length - 1] = {
+                      ...lastMessage,
+                      message: {
+                        ...lastMessage.message,
+                        content: lastMessage.message.content + agentResponse.chunk
+                      }
+                    };
+                    return newMessages;
+                  });
+                }
+              } else if (finishReason === 'STOP') {
+                if (!backendMessage.content) {
+                  continue;
+                }
+                if (activeMessageType === 'assistant') {
+                  setMessages((prev) => {
+                    const newMessages = [...prev];
+                    const lastMessage = newMessages[newMessages.length - 1];
+                    newMessages[newMessages.length - 1] = {
+                      ...lastMessage,
+                      message: backendMessage
+                    };
+                    return newMessages;
+                  });
+                } else {
+                  const lastAssistantContent = messagesRef.current
+                    .filter(m => m.message.messageType === 'assistant')
+                    .at(-1)?.message.content;
+                  if (backendMessage.content && lastAssistantContent === backendMessage.content) {
+                    continue;
+                  }
+                  const newMessage: UIMessage = {
+                    id: `assistant-${Date.now()}`,
+                    message: backendMessage,
+                    timestamp: Date.now()
+                  };
+                  setMessages((prev) => [...prev, newMessage]);
+                  isFirstChunk = false;
+                  activeMessageType = 'assistant';
+                }
+              } else {
+                // Message-only event, no finishReason — non-streaming complete message
+                if (isFirstChunk || activeMessageType !== 'assistant') {
+                  const lastAssistantContent = messagesRef.current
+                    .filter(m => m.message.messageType === 'assistant')
+                    .at(-1)?.message.content;
+                  if (backendMessage.content && lastAssistantContent === backendMessage.content) {
+                    continue;
+                  }
+                  const newMessage: UIMessage = {
+                    id: `assistant-${Date.now()}`,
+                    message: backendMessage,
+                    timestamp: Date.now()
+                  };
+                  setMessages((prev) => [...prev, newMessage]);
+                  isFirstChunk = false;
+                  activeMessageType = 'assistant';
+                } else {
+                  setMessages((prev) => {
+                    const newMessages = [...prev];
+                    const lastMessage = newMessages[newMessages.length - 1];
+                    newMessages[newMessages.length - 1] = {
+                      ...lastMessage,
+                      message: {
+                        ...backendMessage,
+                        content: backendMessage.content || lastMessage.message.content
+                      }
+                    };
+                    return newMessages;
+                  });
+                }
               }
+            } else if (messageType === 'tool-request') {
+              const newMessage: UIMessage = {
+                id: `tool-request-${Date.now()}`,
+                message: backendMessage,
+                timestamp: Date.now()
+              };
+              setMessages((prev) => [...prev, newMessage]);
+              isFirstChunk = true;
+              activeMessageType = 'tool-request';
             } else if (messageType === 'tool-confirm' || messageType === 'tool') {
               const newMessage: UIMessage = {
                 id: `${messageType}-${Date.now()}`,
@@ -497,12 +658,12 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
               };
               setMessages((prev) => [...prev, newMessage]);
               isFirstChunk = true;
+              activeMessageType = messageType;
             }
           } else if (agentResponse.chunk) {
             console.log('[Stream] Processing chunk:', agentResponse.chunk);
 
-            if (isFirstChunk) {
-              // Create new assistant message for first chunk
+            if (isFirstChunk || activeMessageType !== 'assistant') {
               const newAssistantMessage: UIMessage = {
                 id: `assistant-${Date.now()}`,
                 message: {
@@ -513,13 +674,10 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
                 },
                 timestamp: Date.now()
               };
-              setMessages((prev) => {
-                console.log('[Stream] Adding first chunk, prev messages:', prev.length);
-                return [...prev, newAssistantMessage];
-              });
+              setMessages((prev) => [...prev, newAssistantMessage]);
               isFirstChunk = false;
+              activeMessageType = 'assistant';
             } else {
-              // Append chunk to existing content
               setMessages((prev) => {
                 const newMessages = [...prev];
                 const lastMessage = newMessages[newMessages.length - 1];
