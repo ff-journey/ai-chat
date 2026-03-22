@@ -24,3 +24,4 @@ hs_err_pid*
 replay_pid*
 
 *.env
+backend-java/ai-chat-ali/src/main/resources/META-INF

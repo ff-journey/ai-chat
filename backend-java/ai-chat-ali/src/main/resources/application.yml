@@ -7,6 +7,18 @@ spring:
       chat:
         options:
           model: qwen3-max
+      embedding:
+        options:
+          model: text-embedding-v3
+    vectorstore:
+      milvus:
+        client:
+          host: 127.0.0.1
+          port: 19530
+        collection-name: rag_java_demo
+        embedding-dimension: 1024
+        metric-type: COSINE
+        initialize-schema: true
     openai:
       api-key: EMPTY
       base-url: http://localhost:9901
@@ -15,6 +27,7 @@ spring:
           model: qwen3-medical
           temperature: 0.3
         completions-path: /v1/chat/completions
+
   application:
     name: ai-chat-ali
 
