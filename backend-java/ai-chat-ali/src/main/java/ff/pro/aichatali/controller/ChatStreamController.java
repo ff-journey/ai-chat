@@ -1,7 +1,6 @@
 package ff.pro.aichatali.controller;
 
 import com.alibaba.cloud.ai.graph.CompiledGraph;
-import com.alibaba.cloud.ai.graph.NodeOutput;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
@@ -9,7 +8,9 @@ import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
 import com.alibaba.cloud.ai.graph.state.StateSnapshot;
 import com.alibaba.cloud.ai.graph.streaming.OutputType;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
+import com.google.common.collect.Lists;
 import ff.pro.aichatali.service.ChatHistoryService;
+import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
@@ -17,6 +18,10 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.document.Document;
+import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
+import org.springframework.ai.transformer.splitter.TokenTextSplitter;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -42,13 +47,13 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 
-
 @RestController
 @RequestMapping("/api/chat")
 public class ChatStreamController {
 
     private static final Logger log = LoggerFactory.getLogger(ChatStreamController.class);
-
+    @Value("${app.upload.dir:uploads}")
+    private String uploadDir;
     @Autowired
     @Qualifier("supervisor_agent")
     private ReactAgent supervisorAgent;
@@ -63,55 +68,65 @@ public class ChatStreamController {
     @Qualifier("dashScopeChatModel")
     private ChatModel chatModel;
 
-    @Value("${app.upload.dir:uploads}")
-    private String uploadDir;
+    @Autowired
+    TokenTextSplitter tokenTextSplitter;
+    @Autowired
+    VectorStore vectorStore;
 
-    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> stream(
-            @RequestParam String message,
-            @RequestParam(defaultValue = "default") String threadId) {
-        RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
-        try {
-            chatHistoryService.addMessage(threadId, "user", message);
-            StringBuilder aiResponse = new StringBuilder();
-            return supervisorAgent.stream(message, config)
-                    .filter(output -> output instanceof StreamingOutput)
-                    .map(output -> {
-                        StreamingOutput so = (StreamingOutput) output;
-                        if (so.getOutputType() == OutputType.AGENT_MODEL_STREAMING) {
-                            String text = so.message().getText();
-                            aiResponse.append(text);
-                            return text;
-                        }
-                        return "";
-                    })
-                    .filter(text -> !text.isEmpty())
-                    .doOnComplete(() -> {
-                        if (!aiResponse.isEmpty()) {
-                            chatHistoryService.addMessage(threadId, "assistant", aiResponse.toString());
-                        }
-                    });
-        } catch (GraphRunnerException e) {
-            return Flux.error(e);
-        }
-    }
+//    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+//    public Flux<String> stream(
+//            @RequestParam String message,
+//            @RequestParam(defaultValue = "default") String threadId) {
+//        RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
+//        try {
+//            chatHistoryService.addMessage(threadId, "user", message);
+//            StringBuilder aiResponse = new StringBuilder();
+//            return supervisorAgent.stream(message, config)
+//                    .filter(output -> output instanceof StreamingOutput)
+//                    .map(output -> {
+//                        StreamingOutput so = (StreamingOutput) output;
+//                        if (so.getOutputType() == OutputType.AGENT_MODEL_STREAMING) {
+//                            String text = so.message().getText();
+//                            aiResponse.append(text);
+//                            return text;
+//                        }
+//                        return "";
+//                    })
+//                    .filter(text -> !text.isEmpty())
+//                    .doOnComplete(() -> {
+//                        if (!aiResponse.isEmpty()) {
+//                            chatHistoryService.addMessage(threadId, "assistant", aiResponse.toString());
+//                        }
+//                    });
+//        } catch (GraphRunnerException e) {
+//            return Flux.error(e);
+//        }
+//    }
+//
+//    @PostMapping("/send")
+//    public String send(@RequestParam String message,
+//                       @RequestParam(defaultValue = "default") String threadId) throws Exception {
+//        RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
+//        chatHistoryService.addMessage(threadId, "user", message);
+//        String result = supervisorAgent.stream(message, config)
+//                .filter(output -> output instanceof StreamingOutput)
+//                .map(output -> {
+//                    StreamingOutput so = (StreamingOutput) output;
+//                    return so.getOutputType() == OutputType.AGENT_MODEL_STREAMING ? so.message().getText() : "";
+//                })
+//                .filter(text -> !text.isEmpty())
+//                .reduce("", String::concat)
+//                .block();
+//        chatHistoryService.addMessage(threadId, "assistant", result);
+//        return result;
+//    }
 
-    @PostMapping("/send")
-    public String send(@RequestParam String message,
-                       @RequestParam(defaultValue = "default") String threadId) throws Exception {
-        RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
-        chatHistoryService.addMessage(threadId, "user", message);
-        String result = supervisorAgent.stream(message, config)
-                .filter(output -> output instanceof StreamingOutput)
-                .map(output -> {
-                    StreamingOutput so = (StreamingOutput) output;
-                    return so.getOutputType() == OutputType.AGENT_MODEL_STREAMING ? so.message().getText() : "";
-                })
-                .filter(text -> !text.isEmpty())
-                .reduce("", String::concat)
-                .block();
-        chatHistoryService.addMessage(threadId, "assistant", result);
-        return result;
+    private boolean isImage(String contentType, String filename) {
+        if (contentType != null && contentType.startsWith("image/")) return true;
+        if (filename == null) return false;
+        String lower = filename.toLowerCase();
+        return lower.endsWith(".jpg") || lower.endsWith(".jpeg")
+                || lower.endsWith(".png") || lower.endsWith(".webp");
     }
 
     /**
@@ -125,6 +140,59 @@ public class ChatStreamController {
             @RequestParam(value = "threadId", defaultValue = "default") String threadId) {
 
         String savedPath = saveUploadedFile(file);
+        String filename = file.getOriginalFilename();
+        String contentType = file.getContentType();
+        PreHandle preHandle;
+        if (isImage(contentType, filename)) {
+            preHandle = imagePreHandle(message, threadId, savedPath, file);
+        } else {
+            preHandle = filePreHandle(message, threadId, savedPath, file);
+        }
+
+        try {
+            StringBuilder aiResponse = new StringBuilder();
+            return graphStream(threadId, preHandle.message, preHandle.config, aiResponse);
+        } catch (GraphRunnerException e) {
+            return Flux.error(e);
+        }
+    }
+
+    @PostMapping(value = "/upload/test", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<String> multimodal(
+            @RequestParam("file") MultipartFile file
+    ) {
+        String filename = file.getOriginalFilename();
+        String contentType = file.getContentType();
+        return ResponseEntity.ok(filePreHandle("", "", "", file).extension);
+    }
+
+    private PreHandle filePreHandle(String message, String threadId, String savedPath, MultipartFile file) {
+        //todo 前端页面需要支持展示/uploads/rag_repo/目录下的"外挂知识库", 和输入框中的Sample Library并列展示一个按钮可以点击后打开知识库文件目录, 该目录作为rag模型知识库目录
+        //todo 前端页面支持知识库文件的管理, 删除知识库文件和上传知识库文件
+        String fileUrl = "/uploads/rag_repo/" + Paths.get(savedPath).getFileName().toString();
+
+        RunnableConfig config = RunnableConfig.builder()
+                .threadId(threadId)
+                .addMetadata("uploaded_file_path", savedPath)
+                .build();
+
+        chatHistoryService.addMessage(threadId, "user", message, fileUrl);
+        List<Document> documents = new PagePdfDocumentReader(file.getResource()).get();
+        List<Document> chunks = tokenTextSplitter.apply(documents);
+
+        Lists.partition(chunks, 10).forEach(batch->{
+            vectorStore.add(batch);
+        });
+        return new PreHandle(message, config, "Upload "+chunks.size()+" chunks");
+    }
+
+    record PreHandle(String message, RunnableConfig config, String extension) {
+        public PreHandle(String message, RunnableConfig config) {
+            this(message, config, "");
+        }
+    }
+
+    private PreHandle imagePreHandle(String message, String threadId, String savedPath, MultipartFile file) {
         String imageUrl = "/uploads/" + Paths.get(savedPath).getFileName().toString();
 
         RunnableConfig config = RunnableConfig.builder()
@@ -140,30 +208,29 @@ public class ChatStreamController {
         }
 
         chatHistoryService.addMessage(threadId, "user", message, imageUrl);
+        return new PreHandle(message, config);
 
-        try {
-            StringBuilder aiResponse = new StringBuilder();
-            final String finalMessage = message;
-            return supervisorAgent.stream(finalMessage, config)
-                    .filter(output -> output instanceof StreamingOutput)
-                    .map(output -> {
-                        StreamingOutput so = (StreamingOutput) output;
-                        if (so.getOutputType() == OutputType.AGENT_MODEL_STREAMING) {
-                            String text = so.message().getText();
-                            aiResponse.append(text);
-                            return text;
-                        }
-                        return "";
-                    })
-                    .filter(text -> !text.isEmpty())
-                    .doOnComplete(() -> {
-                        if (!aiResponse.isEmpty()) {
-                            chatHistoryService.addMessage(threadId, "assistant", aiResponse.toString());
-                        }
-                    });
-        } catch (GraphRunnerException e) {
-            return Flux.error(e);
-        }
+    }
+
+    @NotNull
+    private Flux<String> graphStream(String threadId, String finalMessage, RunnableConfig config, StringBuilder aiResponse) throws GraphRunnerException {
+        return supervisorAgent.stream(finalMessage, config)
+                .filter(output -> output instanceof StreamingOutput)
+                .map(output -> {
+                    StreamingOutput so = (StreamingOutput) output;
+                    if (so.getOutputType() == OutputType.AGENT_MODEL_STREAMING) {
+                        String text = so.message().getText();
+                        aiResponse.append(text);
+                        return text;
+                    }
+                    return "";
+                })
+                .filter(text -> !text.isEmpty())
+                .doOnComplete(() -> {
+                    if (!aiResponse.isEmpty()) {
+                        chatHistoryService.addMessage(threadId, "assistant", aiResponse.toString());
+                    }
+                });
     }
 
     @Value("${app.samples.dir:samples}")
@@ -333,8 +400,8 @@ public class ChatStreamController {
             if (!content.isBlank()) {
                 String prefix = "user".equals(role) ? "用户：" : "助手：";
                 conv.append(prefix)
-                    .append(content, 0, Math.min(content.length(), 300))
-                    .append("\n");
+                        .append(content, 0, Math.min(content.length(), 300))
+                        .append("\n");
             }
         }
 
@@ -351,7 +418,7 @@ public class ChatStreamController {
 
     private String saveUploadedFile(MultipartFile file) {
         try {
-            Path uploadPath = Paths.get(System.getProperties().get("user.dir").toString(),uploadDir);
+            Path uploadPath = Paths.get(System.getProperties().get("user.dir").toString(), uploadDir);
             Files.createDirectories(uploadPath);
             String filename = UUID.randomUUID() + "_" + file.getOriginalFilename();
             Path dest = uploadPath.resolve(filename);
