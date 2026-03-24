@@ -24,9 +24,11 @@ public class MemoryHybridRetrieverTool implements BiFunction<MemoryHybridRetriev
     BM25Service bm25Service;
     RRFMerger rrfMerger;
 
-
-
-
+    public MemoryHybridRetrieverTool(VectorStore vectorStore, BM25Service bm25Service, RRFMerger rrfMerger) {
+        this.vectorStore = vectorStore;
+        this.bm25Service = bm25Service;
+        this.rrfMerger = rrfMerger;
+    }
 
     private Map<String, String> memoryHybridRetriever(String query){
         List<Document> denseDoc = vectorStore.similaritySearch(
