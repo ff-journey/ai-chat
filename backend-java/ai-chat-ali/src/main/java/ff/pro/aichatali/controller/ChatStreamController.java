@@ -10,6 +10,13 @@ import com.alibaba.cloud.ai.graph.streaming.OutputType;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import com.google.common.collect.Lists;
 import ff.pro.aichatali.service.ChatHistoryService;
+import ff.pro.aichatali.service.rag.BM25Service;
+import ff.pro.aichatali.service.rag.RRFMerger;
+import ff.pro.aichatali.tool.MemoryHybridRetrieverTool;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,7 +26,7 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
+import org.springframework.ai.reader.pdf.ParagraphPdfDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,9 +56,9 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/chat")
+@Slf4j
 public class ChatStreamController {
 
-    private static final Logger log = LoggerFactory.getLogger(ChatStreamController.class);
     @Value("${app.upload.dir:uploads}")
     private String uploadDir;
     @Autowired
@@ -72,6 +79,10 @@ public class ChatStreamController {
     TokenTextSplitter tokenTextSplitter;
     @Autowired
     VectorStore vectorStore;
+    @Autowired
+    BM25Service bm25Service;
+    @Autowired
+    RRFMerger rrfMerger;
 
 //    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 //    public Flux<String> stream(
@@ -177,13 +188,54 @@ public class ChatStreamController {
                 .build();
 
         chatHistoryService.addMessage(threadId, "user", message, fileUrl);
-        List<Document> documents = new PagePdfDocumentReader(file.getResource()).get();
-        List<Document> chunks = tokenTextSplitter.apply(documents);
+        List<Document> documents = parsePdfByPage(file);
+        List<Document> cleanDocs = removeReferencesPages(documents);
+        List<Document> chunks = tokenTextSplitter.apply(cleanDocs);
+        bm25Service.addDocuments(chunks);
 
         Lists.partition(chunks, 10).forEach(batch->{
             vectorStore.add(batch);
         });
         return new PreHandle(message, config, "Upload "+chunks.size()+" chunks");
+    }
+
+
+    private List<Document> parsePdfByPage(MultipartFile file) {
+        List<Document> result = new ArrayList<>();
+        try (PDDocument pdf = Loader.loadPDF(file.getBytes())) {
+            PDFTextStripper stripper = new PDFTextStripper();
+            int totalPages = pdf.getNumberOfPages();
+            for (int i = 1; i <= totalPages; i++) {
+                stripper.setStartPage(i);
+                stripper.setEndPage(i);
+                String text = stripper.getText(pdf);
+                if (text != null && !text.isBlank()) {
+                    result.add(new Document(text, Map.of("page", i)));
+                }
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("PDF 解析失败", e);
+        }
+        return result;
+    }
+    private List<Document> removeReferencesPages(List<Document> documents) {
+        List<String> keywords = List.of("参考文献", "References", "REFERENCES");
+
+        for (int i = 0; i < documents.size(); i++) {
+            String text = documents.get(i).getText();
+            if (text == null) continue;
+
+            // 关键词独占一行时认为是参考文献标题行
+            boolean isRefPage = text.lines()
+                    .map(String::strip)
+                    .anyMatch(line -> keywords.contains(line));
+
+            if (isRefPage) {
+                log.info("上传pdf总页数: {}}, 上传pdf文档截取页数: {}", documents.size(),i);
+                return documents.subList(0, i);
+            }
+        }
+        return documents;
     }
 
     record PreHandle(String message, RunnableConfig config, String extension) {
@@ -429,4 +481,10 @@ public class ChatStreamController {
         }
     }
 
+
+    @GetMapping("/any/test")
+    public void anyTest(){
+        MemoryHybridRetrieverTool memoryHybridRetrieverTool = new MemoryHybridRetrieverTool(vectorStore, bm25Service, rrfMerger);
+        memoryHybridRetrieverTool.apply(new MemoryHybridRetrieverTool.Input("糖尿病慢性并发症"), null);
+    }
 }

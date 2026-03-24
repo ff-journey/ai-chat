@@ -9,8 +9,11 @@ import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
 import com.alibaba.cloud.ai.graph.streaming.OutputType;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
+import ff.pro.aichatali.service.rag.BM25Service;
+import ff.pro.aichatali.service.rag.RRFMerger;
 import ff.pro.aichatali.tool.FeiyanAgentMedicalTool;
 import ff.pro.aichatali.tool.MedicalDiagnosisTool;
+import ff.pro.aichatali.tool.MemoryHybridRetrieverTool;
 import ff.pro.aichatali.tool.PneumoniaRecognitionTool;
 import org.springframework.ai.chat.client.advisor.observation.DefaultAdvisorObservationConvention;
 import org.springframework.ai.chat.model.ChatModel;
@@ -134,6 +137,9 @@ public class AgentConfig {
                                       @Qualifier("chat_agent") ReactAgent chatAgent,
                                       @Qualifier("medicalAgent") ReactAgent medicalAgent,
                                       @Qualifier("ragTool") ToolCallback ragTool,
+                                      BM25Service bm25Service,
+                                      RRFMerger rrfMerger,
+                                      VectorStore vectorStore,
                                       MedicalToolConfig medicalToolConfig,
                                       RestTemplate medicalRestTemplate) {
 
@@ -178,6 +184,11 @@ public class AgentConfig {
                 .description("识别胸部X光影像，给出专业诊断报告")
                 .inputType(FeiyanAgentMedicalTool.Input.class)
                 .build();
+        FunctionToolCallback<MemoryHybridRetrieverTool.Input, Map<String, String>> memoryRagTool =
+                FunctionToolCallback.builder("ragTool", new MemoryHybridRetrieverTool(vectorStore, bm25Service, rrfMerger))
+                .description("从知识库中检索相关文档，当用户需要检索知识库时调用")
+                .inputType(MemoryHybridRetrieverTool.Input.class)
+                .build();
         var prompt = """
                 当前时间：{{current_time}}
                 你是一个优秀的私人助理, 任何动作前都会分析用户意图，并调用合适的工具。
@@ -202,7 +213,8 @@ public class AgentConfig {
         return ReactAgent.builder()
                 .name("supervisor_agent")
                 .model(dashScopeChatModel)
-                .tools(List.of(feiyanAgentMedicalTool, medicalTool, ragTool))
+//                .tools(List.of(feiyanAgentMedicalTool, medicalTool, memoryRagTool))
+                .tools(List.of(memoryRagTool))
                 .systemPrompt(prompt)
                 .saver(new MemorySaver())
                 .build();

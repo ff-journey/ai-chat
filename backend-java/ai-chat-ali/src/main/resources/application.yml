@@ -27,9 +27,12 @@ spring:
           model: qwen3-medical
           temperature: 0.3
         completions-path: /v1/chat/completions
-
   application:
     name: ai-chat-ali
+  servlet:
+    multipart:
+      max-request-size: 100MB
+      max-file-size: 100MB
 
 
 app:
@@ -49,4 +52,6 @@ medical:
 
 logging:
   level:
+    root: INFO
+    ff.pro: DEBUG
     org.springframework.ai: DEBUG

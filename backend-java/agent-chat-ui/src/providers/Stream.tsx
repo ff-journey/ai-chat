@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
 import { createApiClient, ToolFeedbackDTO } from "@/lib/spring-ai-api";
-import { UIMessage, createUIMessage, fromMessageDTO } from "@/types/messages";
+import { UIMessage, ToolRequestMessage, createUIMessage, fromMessageDTO } from "@/types/messages";
 
 export interface ContentBlock {
   type: string;
@@ -288,6 +288,9 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
           // Used to avoid appending chunks to non-assistant messages (e.g. tool-request)
           // and to detect supervisor pass-through duplicates.
           let activeMessageType: string | null = null;
+          // Synchronous dedup for tool-request: messagesRef lags behind React renders,
+          // so track the last-seen tool-call IDs locally within the loop.
+          let lastToolReqIds = '';
           console.log('[Stream] Starting to process agent responses...');
 
           for await (const agentResponse of stream) {
@@ -398,6 +401,9 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
                   }
                 }
               } else if (messageType === 'tool-request') {
+                const incomingIds = ((backendMessage as ToolRequestMessage).toolCalls ?? []).map((tc) => tc.id).join(',');
+                if (incomingIds && incomingIds === lastToolReqIds) continue;
+                lastToolReqIds = incomingIds;
                 const newMessage: UIMessage = {
                   id: `tool-request-${Date.now()}`,
                   message: backendMessage,
@@ -533,6 +539,7 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
 
         let isFirstChunk = true;
         let activeMessageType: string | null = null;
+        let lastToolReqIds = '';
         console.log('[Stream] Starting to process resume agent responses...');
 
         for await (const agentResponse of stream) {
@@ -642,6 +649,11 @@ export const StreamProvider: React.FC<StreamProviderProps> = ({ children }) => {
                 }
               }
             } else if (messageType === 'tool-request') {
+              // Deduplicate: DashScope emits the final tool-call delta and the
+              // finish-reason event with identical content, both as AGENT_MODEL_STREAMING.
+              const incomingIds = ((backendMessage as ToolRequestMessage).toolCalls ?? []).map((tc) => tc.id).join(',');
+              if (incomingIds && incomingIds === lastToolReqIds) continue;
+              lastToolReqIds = incomingIds;
               const newMessage: UIMessage = {
                 id: `tool-request-${Date.now()}`,
                 message: backendMessage,
