@@ -9,6 +9,10 @@ import com.alibaba.cloud.ai.graph.state.StateSnapshot;
 import com.alibaba.cloud.ai.graph.streaming.OutputType;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import com.google.common.collect.Lists;
+import ff.pro.aichatali.common.HierarchicalDocSplitter;
+import ff.pro.aichatali.common.ParentChunkStore;
+import ff.pro.aichatali.repo.RagChunkMapper;
+import ff.pro.aichatali.repo.RagChunkPo;
 import ff.pro.aichatali.service.ChatHistoryService;
 import ff.pro.aichatali.service.rag.BM25Service;
 import ff.pro.aichatali.service.rag.RRFMerger;
@@ -26,6 +30,10 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.embedding.BatchingStrategy;
+import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.ai.embedding.EmbeddingOptions;
+import org.springframework.ai.model.EmbeddingUtils;
 import org.springframework.ai.reader.pdf.ParagraphPdfDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -83,6 +91,16 @@ public class ChatStreamController {
     BM25Service bm25Service;
     @Autowired
     RRFMerger rrfMerger;
+    @Autowired
+    HierarchicalDocSplitter hierarchicalDocSplitter;
+    @Autowired
+    ParentChunkStore parentChunkStore;
+    @Autowired
+    RagChunkMapper ragChunkMapper;
+    @Autowired
+    EmbeddingModel embeddingModel;
+    @Autowired
+    private BatchingStrategy batchingStrategy;
 
 //    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 //    public Flux<String> stream(
@@ -191,12 +209,26 @@ public class ChatStreamController {
         List<Document> documents = parsePdfByPage(file);
         List<Document> cleanDocs = removeReferencesPages(documents);
         List<Document> chunks = tokenTextSplitter.apply(cleanDocs);
-        bm25Service.addDocuments(chunks);
 
-        Lists.partition(chunks, 10).forEach(batch->{
-            vectorStore.add(batch);
+        chunks.forEach(it -> {
+            var result = hierarchicalDocSplitter.split(it, file.getName());
+            result.l1().forEach(l1 -> parentChunkStore.put(l1.getId(), l1));
+            result.l2().forEach(l2 -> parentChunkStore.put(l2.getId(), l2));
+            List<float[]> embed = embeddingModel.embed(result.l3(), EmbeddingOptions.builder().build(), batchingStrategy);
+            List<RagChunkPo> poList = new ArrayList<>();
+            for (int i = 0; i < result.l3().size(); i++) {
+                poList.add(new RagChunkPo(result.l3().get(i), EmbeddingUtils.toList(embed.get(i))));
+            }
+            ragChunkMapper.batchInsert(poList);
+//            vectorStore.add(result.l3());
+            bm25Service.addDocuments(result.l3());
         });
-        return new PreHandle(message, config, "Upload "+chunks.size()+" chunks");
+
+
+//        Lists.partition(chunks, 10).forEach(batch -> {
+//            vectorStore.add(batch);
+//        });
+        return new PreHandle(message, config, "Upload " + chunks.size() + " chunks");
     }
 
 
@@ -218,6 +250,7 @@ public class ChatStreamController {
         }
         return result;
     }
+
     private List<Document> removeReferencesPages(List<Document> documents) {
         List<String> keywords = List.of("参考文献", "References", "REFERENCES");
 
@@ -231,7 +264,7 @@ public class ChatStreamController {
                     .anyMatch(line -> keywords.contains(line));
 
             if (isRefPage) {
-                log.info("上传pdf总页数: {}}, 上传pdf文档截取页数: {}", documents.size(),i);
+                log.info("上传pdf总页数: {}}, 上传pdf文档截取页数: {}", documents.size(), i);
                 return documents.subList(0, i);
             }
         }
@@ -483,7 +516,7 @@ public class ChatStreamController {
 
 
     @GetMapping("/any/test")
-    public void anyTest(){
+    public void anyTest() {
         MemoryHybridRetrieverTool memoryHybridRetrieverTool = new MemoryHybridRetrieverTool(vectorStore, bm25Service, rrfMerger);
         memoryHybridRetrieverTool.apply(new MemoryHybridRetrieverTool.Input("糖尿病慢性并发症"), null);
     }
