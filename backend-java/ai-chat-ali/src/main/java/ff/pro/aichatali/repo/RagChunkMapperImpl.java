@@ -1,20 +1,28 @@
 package ff.pro.aichatali.repo;
 
-import com.google.common.reflect.TypeToken;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.Gson;
 import ff.pro.aichatali.config.MilvusConfig;
 import io.milvus.client.MilvusServiceClient;
 import io.milvus.param.dml.InsertParam;
 import io.milvus.param.dml.QueryParam;
 import io.milvus.param.dml.SearchParam;
-import io.milvus.param.highlevel.dml.InsertRowsParam;
 import io.milvus.response.QueryResultsWrapper;
 import io.milvus.response.SearchResultsWrapper;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
+import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Repository;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Repository
 @RequiredArgsConstructor
@@ -23,7 +31,9 @@ public class RagChunkMapperImpl implements RagChunkMapper {
     private final MilvusServiceClient milvusClient;
     private static final String COLLECTION = MilvusConfig.COLLECTION_NAME;
     private final Gson gson;
-
+    private final Map<String, Document> store = new ConcurrentHashMap<>();
+    private final Path storePath = Path.of("data/parent_chunks.json");
+    final ObjectMapper objectMapper;
 
     @Override
     public void batchInsert(List<RagChunkPo> chunks) {
@@ -47,9 +57,10 @@ public class RagChunkMapperImpl implements RagChunkMapper {
         SearchParam param = SearchParam.newBuilder()
                 .withCollectionName(COLLECTION)
                 .withFloatVectors(List.of(vector))
+                .withVectorFieldName("embedding")
                 .withTopK(topK)
-                .withExpr(filter)   // "source_id == 'xxx' and chunk_level == 3"
-                .withOutFields(List.of("doc_id", "content", "source_id", "parent_id"))
+                .withExpr(filter == null ? "" : filter)   // "source_id == 'xxx' and chunk_level == 3"
+                .withOutFields(List.of("doc_id", "content", "source_id", "parent_id", "chunk_level"))
                 .build();
 
         SearchResultsWrapper wrapper = new SearchResultsWrapper(
@@ -85,7 +96,53 @@ public class RagChunkMapperImpl implements RagChunkMapper {
                 .sourceId((String) row.get("source_id"))
                 .parentId((String) row.get("parent_id"))
 //                .metadata(gson.fromJson((String) row.get("metadata"), new TypeToken<Map<String, Object>>(){}.getType()))
-                .chunkLevel((int) row.get("chunk_level"))
+                .chunkLevel(row.get("chunk_level") == null ? 0 : (int) row.get("chunk_level"))
+                .document(Document.builder()
+                        .id((String) row.get("doc_id"))
+                        .text((String) row.get("content"))
+                        .metadata(Map.of("source_id", (String) row.get("source_id"), "parent_id", (String) row.get("parent_id"), "chunk_level", (int) row.get("chunk_level")))
+                        .build())
                 .build();
+    }
+
+    @Override
+    public void insertParentChunk(String id, Document doc) {
+        store.put(id, doc);
+        persist();
+    }
+
+    public Optional<Document> getParentChunk(String id, int level) {
+        return Optional.ofNullable(store.get(id));
+    }
+    public List<Document> getParentChunk(List<String> ids, int level) {
+        List<Document> docs = ids.stream().map(id->store.getOrDefault(id, new Document(""))).toList();
+        return docs;
+    }
+
+    @PostConstruct
+    public void load() {
+        if (Files.exists(storePath)) {
+            try {
+                Map<String, String> raw = objectMapper.readValue(
+                        storePath.toFile(),
+                        new TypeReference<>() {
+                        }
+                );
+                raw.forEach((k, v) -> store.put(k, new Document(v)));
+            } catch (IOException e) {
+                // 启动时没有文件也没关系
+            }
+        }
+    }
+
+    private void persist() {
+        try {
+            Files.createDirectories(storePath.getParent());
+            Map<String, String> raw = new HashMap<>();
+            store.forEach((k, v) -> raw.put(k, v.getText()));
+            objectMapper.writeValue(storePath.toFile(), raw);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to persist parent chunks", e);
+        }
     }
 }

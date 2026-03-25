@@ -1,7 +1,6 @@
 package ff.pro.aichatali.config;
 
 import com.alibaba.cloud.ai.agent.studio.loader.AgentLoader;
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.agent.Agent;
 import com.alibaba.cloud.ai.graph.agent.AgentTool;
@@ -12,28 +11,22 @@ import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import ff.pro.aichatali.service.rag.BM25Service;
 import ff.pro.aichatali.service.rag.RRFMerger;
 import ff.pro.aichatali.tool.FeiyanAgentMedicalTool;
-import ff.pro.aichatali.tool.MedicalDiagnosisTool;
-import ff.pro.aichatali.tool.MemoryHybridRetrieverTool;
+import ff.pro.aichatali.service.MemoryHybridRetrieverService;
 import ff.pro.aichatali.tool.PneumoniaRecognitionTool;
 import org.springframework.ai.chat.client.advisor.observation.DefaultAdvisorObservationConvention;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ToolContext;
-import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.function.FunctionToolCallback;
-import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
@@ -141,7 +134,8 @@ public class AgentConfig {
                                       RRFMerger rrfMerger,
                                       VectorStore vectorStore,
                                       MedicalToolConfig medicalToolConfig,
-                                      RestTemplate medicalRestTemplate) {
+                                      RestTemplate medicalRestTemplate,
+                                      MemoryHybridRetrieverService memoryHybridRetrieverService) {
 
         ToolCallback weatherAgentTool = FunctionToolCallback
                 .builder("weather_agent", (BiFunction<String, ToolContext, String>) (query, ctx) -> {
@@ -184,10 +178,10 @@ public class AgentConfig {
                 .description("识别胸部X光影像，给出专业诊断报告")
                 .inputType(FeiyanAgentMedicalTool.Input.class)
                 .build();
-        FunctionToolCallback<MemoryHybridRetrieverTool.Input, Map<String, String>> memoryRagTool =
-                FunctionToolCallback.builder("ragTool", new MemoryHybridRetrieverTool(vectorStore, bm25Service, rrfMerger))
+        FunctionToolCallback<MemoryHybridRetrieverService.Input, Map<String, String>> memoryRagTool =
+                FunctionToolCallback.builder("ragTool", memoryHybridRetrieverService)
                 .description("从知识库中检索相关文档，当用户需要检索知识库时调用")
-                .inputType(MemoryHybridRetrieverTool.Input.class)
+                .inputType(MemoryHybridRetrieverService.Input.class)
                 .build();
         var prompt = """
                 当前时间：{{current_time}}
@@ -243,8 +237,5 @@ public class AgentConfig {
         };
     }
 
-    @Bean
-    public TokenTextSplitter tokenTextSplitter() {
-        return new TokenTextSplitter(300, 50, 5, 10000, true);
-    }
+
 }

@@ -9,7 +9,7 @@ spring:
           model: qwen3-max
       embedding:
         options:
-          model: text-embedding-v3
+          model: text-embedding-v4
           dimensions: 1024
     vectorstore:
       milvus:

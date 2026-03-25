@@ -2,6 +2,8 @@ package ff.pro.aichatali.config;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.web.servlet.config.annotation.AsyncSupportConfigurer;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -12,7 +14,7 @@ import java.nio.file.Paths;
  * 访问路径：/uploads/** 和 /samples/**。
  */
 @Configuration
-public class CustomWebConfig implements WebMvcConfigurer {
+public class WebMvcConfig implements WebMvcConfigurer {
 
     @Value("${app.upload.dir:uploads}")
     private String uploadDir;
@@ -33,5 +35,17 @@ public class CustomWebConfig implements WebMvcConfigurer {
         if (!samplesLocation.endsWith("/")) samplesLocation += "/";
         registry.addResourceHandler("/"+samplesDir+"/**")
                 .addResourceLocations(samplesLocation);
+    }
+
+    @Override
+    public void configureAsyncSupport(AsyncSupportConfigurer configurer) {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(10);
+        executor.setMaxPoolSize(50);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("mvc-async-");
+        executor.initialize();
+        configurer.setTaskExecutor(executor);
+        configurer.setDefaultTimeout(300_000L); // 300秒，适合流式场景
     }
 }

@@ -10,31 +10,27 @@ import com.alibaba.cloud.ai.graph.streaming.OutputType;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import com.google.common.collect.Lists;
 import ff.pro.aichatali.common.HierarchicalDocSplitter;
-import ff.pro.aichatali.common.ParentChunkStore;
+import ff.pro.aichatali.common.ThreadPoolHelper;
+import ff.pro.aichatali.controller.dto.L3ChunkDto;
 import ff.pro.aichatali.repo.RagChunkMapper;
 import ff.pro.aichatali.repo.RagChunkPo;
 import ff.pro.aichatali.service.ChatHistoryService;
+import ff.pro.aichatali.service.EmbeddingService;
 import ff.pro.aichatali.service.rag.BM25Service;
 import ff.pro.aichatali.service.rag.RRFMerger;
-import ff.pro.aichatali.tool.MemoryHybridRetrieverTool;
+import ff.pro.aichatali.service.MemoryHybridRetrieverService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.jetbrains.annotations.NotNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.embedding.BatchingStrategy;
-import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.embedding.EmbeddingOptions;
 import org.springframework.ai.model.EmbeddingUtils;
-import org.springframework.ai.reader.pdf.ParagraphPdfDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,13 +48,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 
@@ -94,13 +85,10 @@ public class ChatStreamController {
     @Autowired
     HierarchicalDocSplitter hierarchicalDocSplitter;
     @Autowired
-    ParentChunkStore parentChunkStore;
-    @Autowired
     RagChunkMapper ragChunkMapper;
+
     @Autowired
-    EmbeddingModel embeddingModel;
-    @Autowired
-    private BatchingStrategy batchingStrategy;
+    private EmbeddingService embeddingService;
 
 //    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 //    public Flux<String> stream(
@@ -175,7 +163,7 @@ public class ChatStreamController {
         if (isImage(contentType, filename)) {
             preHandle = imagePreHandle(message, threadId, savedPath, file);
         } else {
-            preHandle = filePreHandle(message, threadId, savedPath, file);
+            preHandle = filePreHandle(message, threadId, savedPath, file, true);
         }
 
         try {
@@ -192,10 +180,10 @@ public class ChatStreamController {
     ) {
         String filename = file.getOriginalFilename();
         String contentType = file.getContentType();
-        return ResponseEntity.ok(filePreHandle("", "", "", file).extension);
+        return ResponseEntity.ok(filePreHandle("", "", "", file, false).extension);
     }
 
-    private PreHandle filePreHandle(String message, String threadId, String savedPath, MultipartFile file) {
+    private PreHandle filePreHandle(String message, String threadId, String savedPath, MultipartFile file, boolean milvus) {
         //todo 前端页面需要支持展示/uploads/rag_repo/目录下的"外挂知识库", 和输入框中的Sample Library并列展示一个按钮可以点击后打开知识库文件目录, 该目录作为rag模型知识库目录
         //todo 前端页面支持知识库文件的管理, 删除知识库文件和上传知识库文件
         String fileUrl = "/uploads/rag_repo/" + Paths.get(savedPath).getFileName().toString();
@@ -208,27 +196,38 @@ public class ChatStreamController {
         chatHistoryService.addMessage(threadId, "user", message, fileUrl);
         List<Document> documents = parsePdfByPage(file);
         List<Document> cleanDocs = removeReferencesPages(documents);
-        List<Document> chunks = tokenTextSplitter.apply(cleanDocs);
+//        List<Document> chunks = tokenTextSplitter.apply(cleanDocs);
 
-        chunks.forEach(it -> {
-            var result = hierarchicalDocSplitter.split(it, file.getName());
-            result.l1().forEach(l1 -> parentChunkStore.put(l1.getId(), l1));
-            result.l2().forEach(l2 -> parentChunkStore.put(l2.getId(), l2));
-            List<float[]> embed = embeddingModel.embed(result.l3(), EmbeddingOptions.builder().build(), batchingStrategy);
-            List<RagChunkPo> poList = new ArrayList<>();
-            for (int i = 0; i < result.l3().size(); i++) {
-                poList.add(new RagChunkPo(result.l3().get(i), EmbeddingUtils.toList(embed.get(i))));
-            }
-            ragChunkMapper.batchInsert(poList);
-//            vectorStore.add(result.l3());
-            bm25Service.addDocuments(result.l3());
-        });
+        List<L3ChunkDto> l3chunks = cleanDocs.parallelStream()
+                .flatMap(it -> {
+                    var result = hierarchicalDocSplitter.split(it, file.getName());
+                    result.l1().forEach(l1 -> ragChunkMapper.insertParentChunk(l1.getId(), l1));
+                    result.l2().forEach(l2 -> ragChunkMapper.insertParentChunk(l2.getId(), l2));
+                    // 收集l3, 批量处理
+                    return result.l3().stream()
+                            .map(l3 -> new L3ChunkDto(new RagChunkPo(l3, null), l3));
+                })
+                .toList();
+        if (milvus) {
+            List<CompletableFuture<Void>> futures = Lists.partition(l3chunks, 10).stream()
+                    .map(batch -> CompletableFuture.runAsync(() -> batchEmbed(batch), ThreadPoolHelper.EXECUTOR_SERVICE))
+                    .toList();
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+            ragChunkMapper.batchInsert(l3chunks.stream().map(L3ChunkDto::getRagChunk).toList());
+        }
+        bm25Service.addDocuments(l3chunks.stream().map(L3ChunkDto::getDocument).toList());
 
 
-//        Lists.partition(chunks, 10).forEach(batch -> {
-//            vectorStore.add(batch);
-//        });
-        return new PreHandle(message, config, "Upload " + chunks.size() + " chunks");
+        return new PreHandle(message, config, "Upload " + l3chunks.size() + " chunks");
+    }
+
+    private void batchEmbed(List<L3ChunkDto> batch) {
+        List<Document> docs = batch.stream().map(L3ChunkDto::getDocument).toList();
+        List<float[]> embed = embeddingService.embed(docs);
+        for (int i = 0; i < docs.size(); i++) {
+            Objects.requireNonNull(batch.get(i)).getRagChunk().setEmbedding(EmbeddingUtils.toList(embed.get(i)));
+        }
     }
 
 
@@ -242,13 +241,21 @@ public class ChatStreamController {
                 stripper.setEndPage(i);
                 String text = stripper.getText(pdf);
                 if (text != null && !text.isBlank()) {
-                    result.add(new Document(text, Map.of("page", i)));
+                    result.add(new Document(sanitizeText(text), Map.of("page", i)));
                 }
             }
         } catch (IOException e) {
             throw new RuntimeException("PDF 解析失败", e);
         }
         return result;
+    }
+    private String sanitizeText(String text) {
+        if (text == null) return "";
+        // 移除 unpaired surrogate 字符
+        return text.chars()
+                .filter(c -> !Character.isSurrogate((char) c))
+                .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
+                .toString();
     }
 
     private List<Document> removeReferencesPages(List<Document> documents) {
@@ -517,7 +524,7 @@ public class ChatStreamController {
 
     @GetMapping("/any/test")
     public void anyTest() {
-        MemoryHybridRetrieverTool memoryHybridRetrieverTool = new MemoryHybridRetrieverTool(vectorStore, bm25Service, rrfMerger);
-        memoryHybridRetrieverTool.apply(new MemoryHybridRetrieverTool.Input("糖尿病慢性并发症"), null);
+        MemoryHybridRetrieverService memoryHybridRetrieverService = new MemoryHybridRetrieverService(ragChunkMapper, bm25Service, rrfMerger, embeddingService);
+        memoryHybridRetrieverService.apply(new MemoryHybridRetrieverService.Input("检索文档, 血糖控制不好的老年糖尿病患者，HbA1c 目标值应该放宽到多少？"), null);
     }
 }

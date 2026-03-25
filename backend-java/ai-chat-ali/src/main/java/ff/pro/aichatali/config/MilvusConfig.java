@@ -11,6 +11,7 @@ import org.jetbrains.annotations.NotNull;
 import org.springframework.ai.embedding.BatchingStrategy;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.TokenCountBatchingStrategy;
+import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.milvus.MilvusVectorStore;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +29,10 @@ public class MilvusConfig implements InitializingBean {
 
     public static final String DATABASE_NAME = "default";
     public static final String COLLECTION_NAME = "rag_java_demo";
+    @Bean
+    public TokenTextSplitter tokenTextSplitter() {
+        return new TokenTextSplitter(300, 50, 5, 10000, true);
+    }
     @Bean
     public BatchingStrategy batchingStrategy() {
         return new TokenCountBatchingStrategy();
@@ -53,7 +58,7 @@ public class MilvusConfig implements InitializingBean {
 
     @Override
     public void afterPropertiesSet() throws Exception {
-
+        createChunkCollection();
     }
 
     private void createChunkCollection() {
@@ -82,11 +87,11 @@ public class MilvusConfig implements InitializingBean {
                 .withMaxLength(65535)
                 .build();
 
-        FieldType metadata = FieldType.newBuilder()
-                .withName("metadata")
-                .withDataType(DataType.JSON)
-                .withMaxLength(65535)
-                .build();
+//        FieldType metadata = FieldType.newBuilder()
+//                .withName("metadata")
+//                .withDataType(DataType.JSON)
+//                .withMaxLength(65535)
+//                .build();
 
         FieldType sourceId = FieldType.newBuilder()
                 .withName("source_id")
@@ -102,13 +107,13 @@ public class MilvusConfig implements InitializingBean {
 
         FieldType chunkLevel = FieldType.newBuilder()
                 .withName("chunk_level")
-                .withDataType(DataType.Int64)
+                .withDataType(DataType.Int32)
                 .build();
 
         FieldType embedding = FieldType.newBuilder()
                 .withName("embedding")
                 .withDataType(DataType.FloatVector)
-                .withDimension(1536)
+                .withDimension(1024)
                 .build();
 
         // 建 collection
@@ -121,7 +126,7 @@ public class MilvusConfig implements InitializingBean {
                                 .addFieldType(docId)
                                 .addFieldType(content)
                                 .addFieldType(sourceId)
-                                .addFieldType(metadata)
+//                                .addFieldType(metadata)
                                 .addFieldType(parentId)
                                 .addFieldType(chunkLevel)
                                 .addFieldType(embedding)

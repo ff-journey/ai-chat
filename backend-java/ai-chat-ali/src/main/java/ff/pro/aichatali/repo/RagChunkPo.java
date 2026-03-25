@@ -24,6 +24,8 @@ public class RagChunkPo {
     private int chunkLevel;
 //    private Map<String, String> metadata;
     private List<Float> embedding;
+    private Document document;
+
 
     public RagChunkPo(Document chunk, List<Float> embedding) {
         this.docId = chunk.getId();
@@ -32,5 +34,6 @@ public class RagChunkPo {
         this.parentId = ((String) chunk.getMetadata().get("parent_id"));
         this.chunkLevel = ((Integer) chunk.getMetadata().get("chunk_level"));
         this.embedding = embedding;
+        this.document = chunk;
     }
 }
