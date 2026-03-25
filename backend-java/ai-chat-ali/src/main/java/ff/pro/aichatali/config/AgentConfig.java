@@ -1,6 +1,7 @@
 package ff.pro.aichatali.config;
 
 import com.alibaba.cloud.ai.agent.studio.loader.AgentLoader;
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.agent.Agent;
 import com.alibaba.cloud.ai.graph.agent.AgentTool;
@@ -13,6 +14,7 @@ import ff.pro.aichatali.service.rag.RRFMerger;
 import ff.pro.aichatali.tool.FeiyanAgentMedicalTool;
 import ff.pro.aichatali.service.MemoryHybridRetrieverService;
 import ff.pro.aichatali.tool.PneumoniaRecognitionTool;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.observation.DefaultAdvisorObservationConvention;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ToolContext;
@@ -24,6 +26,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
@@ -36,6 +39,13 @@ import java.util.stream.Collectors;
 
 @Configuration
 public class AgentConfig {
+    @Bean("generalChatClient")
+    @Primary
+    public ChatClient generalChatClient(@Qualifier("dashScopeChatModel") DashScopeChatModel chatModel) {
+        return ChatClient.builder(chatModel)
+                .defaultSystem("你是一个通用助手")
+                .build();
+    }
 
     @Bean("weather_agent")
     public ReactAgent weatherAgent(@Qualifier("dashScopeChatModel") ChatModel chatModel) {

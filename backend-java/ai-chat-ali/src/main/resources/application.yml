@@ -28,6 +28,9 @@ spring:
           model: qwen3-medical
           temperature: 0.3
         completions-path: /v1/chat/completions
+    chat:
+      client:
+        enabled: false
   application:
     name: ai-chat-ali
   servlet:
@@ -56,3 +59,5 @@ logging:
     root: INFO
     ff.pro: DEBUG
     org.springframework.ai: DEBUG
+jina:
+  api-key: ${JINA_API_KEY}

@@ -1,6 +1,7 @@
 package ff.pro.aichatali.common;
 
 
+import org.jetbrains.annotations.NotNull;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Component;
 
@@ -9,7 +10,10 @@ import java.util.*;
 @Component
 public class HierarchicalDocSplitter {
     private static final int MIN_CHUNK_RATIO = 3;   // 最小 chunk = size / 3
-    private static final String SEPARATORS = "。！？；\n";
+    // 中文句末标点
+    static final Set<Character> sentenceEnd = Set.of('。', '！', '？', '；', '\n');
+    // 中文句中停顿
+    static final Set<Character> pauseMark = Set.of('，', '、', '：');
 
     public record HierarchyResult(
             List<Document> l1,
@@ -23,18 +27,18 @@ public class HierarchicalDocSplitter {
             return new HierarchyResult(List.of(), List.of(), List.of());
         }
 
-        // L1: 大段，约 1200 字
-        List<Document> l1 = splitText(source.getText(), 1200, 200, sourceId, null, 1);
+        // L1: 大段，约 1024 字
+        List<Document> l1 = splitText(source.getText(), 2048, 0, sourceId, null, 1);
         List<Document> l2 = new ArrayList<>();
         List<Document> l3 = new ArrayList<>();
 
         for (Document d1 : l1) {
-            // L2: 段落，约 600 字
-            List<Document> l2s = splitText(d1.getText(), 600, 100, sourceId, d1.getId(), 2);
+            // L2: 段落，约 256 字
+            List<Document> l2s = splitText(d1.getText(), 512, 0, sourceId, d1.getId(), 2);
             l2.addAll(l2s);
             for (Document d2 : l2s) {
-                // L3: 叶子，约 300 字 → 存 Milvus
-                l3.addAll(splitText(d2.getText(), 300, 50, sourceId, d2.getId(), 3));
+                // L3: 叶子，约 64 字 → 存 Milvus
+                l3.addAll(splitL3SemanticAware(d2.getText(), 128, 10, sourceId, d2.getId()));
             }
         }
 
@@ -48,19 +52,12 @@ public class HierarchicalDocSplitter {
         int start = 0;
         while (start < text.length()) {
             int hardEnd = Math.min(start + size, text.length());
-            // 规则切割：尝试找语义边界
+            // 规则切割：父层级直接硬切, 子层级找最近的语义边界
             int end = hardEnd;
-            if (hardEnd < text.length()) {
-                int boundary = findBoundary(text, start, hardEnd);
-                if (boundary > start) end = boundary;
-            }
             String chunkText = text.substring(start, end);
             if (chunkText.length() >= minSize) {
-                Map<String, Object> meta = new HashMap<>();
-                meta.put("chunk_level", level);
-                meta.put("source_id", sourceId);
-                if (parentId != null) meta.put("parent_id", parentId);
-                chunks.add(new Document(chunkText, meta));
+                Document doc = toDoc(sourceId, parentId, level, chunkText);
+                chunks.add(doc);
             }
             if (end == text.length()) break;
             start += (size - overlap);
@@ -68,17 +65,49 @@ public class HierarchicalDocSplitter {
         return chunks;
     }
 
-    /**
-     * 规则切割：在 end 附近向前找最近的语义边界
-     */
-    private int findBoundary(String text, int start, int end) {
-        // 从 end 向前扫描，最多回退 size/4
-        int scanLimit = Math.max(start, end - (end - start) / 4);
-        for (int i = end - 1; i >= scanLimit; i--) {
-            if (SEPARATORS.indexOf(text.charAt(i)) >= 0) {
-                return i + 1; // 边界后一位作为 end（包含标点）
+    @NotNull
+    private static Document toDoc(String sourceId, String parentId, int level, String chunkText) {
+        Map<String, Object> meta = new HashMap<>();
+        meta.put("chunk_level", level);
+        meta.put("source_id", sourceId);
+        if (parentId != null) meta.put("parent_id", parentId);
+        Document e = new Document(chunkText, meta);
+        return e;
+    }
+
+
+    private List<Document> splitL3SemanticAware(String text, int targetSize, int overlapSize, String sourceId, String parentId) {
+
+        List<Document> chunks = new ArrayList<>();
+        int start = 0;
+
+        while (start < text.length()) {
+            int end = Math.min(start + targetSize, text.length());
+            if (end == text.length()) {
+                chunks.add(toDoc(sourceId, parentId, 3, text.substring(start)));
+                break;
             }
+
+            int lookback = targetSize / 5;
+            int cutAt = findSemanticCut(text, end, lookback);
+
+            chunks.add(toDoc(sourceId, parentId, 3, text.substring(start, cutAt)));
+
+            // overlap：从cutAt往前推overlapSize，再找语义边界作为下一个start
+            int overlapStart = Math.max(start + 1, cutAt - overlapSize);
+            start = findSemanticCut(text, overlapStart, overlapSize / 3);
         }
-        return -1; // 找不到，fallback 硬截断
+        return chunks;
+    }
+
+    // 抽出来复用
+    private int findSemanticCut(String text, int end, int lookback) {
+        for (int i = end; i >= Math.max(0, end - lookback); i--) {
+            if (sentenceEnd.contains(text.charAt(i))) return i + 1;
+        }
+        for (int i = end; i >= Math.max(0, end - lookback); i--) {
+            if (pauseMark.contains(text.charAt(i))) return i + 1;
+        }
+        return end;
     }
 }

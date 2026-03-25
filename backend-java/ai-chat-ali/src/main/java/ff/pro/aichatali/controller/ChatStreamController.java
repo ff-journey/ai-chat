@@ -89,6 +89,8 @@ public class ChatStreamController {
 
     @Autowired
     private EmbeddingService embeddingService;
+    @Autowired
+    MemoryHybridRetrieverService hybridRetrieverService;
 
 //    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 //    public Flux<String> stream(
@@ -176,11 +178,12 @@ public class ChatStreamController {
 
     @PostMapping(value = "/upload/test", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<String> multimodal(
-            @RequestParam("file") MultipartFile file
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "milvus", required = false, defaultValue = "false") boolean milvus
     ) {
         String filename = file.getOriginalFilename();
         String contentType = file.getContentType();
-        return ResponseEntity.ok(filePreHandle("", "", "", file, false).extension);
+        return ResponseEntity.ok(filePreHandle("", "", "", file, milvus).extension);
     }
 
     private PreHandle filePreHandle(String message, String threadId, String savedPath, MultipartFile file, boolean milvus) {
@@ -251,11 +254,22 @@ public class ChatStreamController {
     }
     private String sanitizeText(String text) {
         if (text == null) return "";
-        // 移除 unpaired surrogate 字符
+
         return text.chars()
                 .filter(c -> !Character.isSurrogate((char) c))
                 .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
-                .toString();
+                .toString()
+                // 中文字符之间的空格去掉
+                .replaceAll("(?<=[\u4e00-\u9fa5]) +(?=[\u4e00-\u9fa5])", "")
+                // 中文和数字/字母之间的空格去掉
+                .replaceAll("(?<=[\u4e00-\u9fa5]) +(?=[a-zA-Z0-9])", "")
+                .replaceAll("(?<=[a-zA-Z0-9]) +(?=[\u4e00-\u9fa5])", "")
+                // 多个连续空格合并为一个（保留英文单词间距）
+                .replaceAll(" {2,}", " ")
+                // 多个连续换行合并为两个（保留段落结构）
+                .replaceAll("\n{3,}", "\n\n")
+                // 去掉行尾空格
+                .replaceAll(" +\n", "\n");
     }
 
     private List<Document> removeReferencesPages(List<Document> documents) {
@@ -524,7 +538,6 @@ public class ChatStreamController {
 
     @GetMapping("/any/test")
     public void anyTest() {
-        MemoryHybridRetrieverService memoryHybridRetrieverService = new MemoryHybridRetrieverService(ragChunkMapper, bm25Service, rrfMerger, embeddingService);
-        memoryHybridRetrieverService.apply(new MemoryHybridRetrieverService.Input("检索文档, 血糖控制不好的老年糖尿病患者，HbA1c 目标值应该放宽到多少？"), null);
+        hybridRetrieverService.apply(new MemoryHybridRetrieverService.Input("检索文档, 血糖控制不好的老年糖尿病患者，HbA1c 目标值应该放宽到多少？"), null);
     }
 }

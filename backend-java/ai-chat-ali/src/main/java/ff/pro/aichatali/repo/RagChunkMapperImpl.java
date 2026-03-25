@@ -1,5 +1,6 @@
 package ff.pro.aichatali.repo;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.Gson;
@@ -23,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 @Repository
 @RequiredArgsConstructor
@@ -111,24 +113,42 @@ public class RagChunkMapperImpl implements RagChunkMapper {
         persist();
     }
 
-    public Optional<Document> getParentChunk(String id, int level) {
+    public Optional<Document> getParentChunk(String id) {
         return Optional.ofNullable(store.get(id));
     }
-    public List<Document> getParentChunk(List<String> ids, int level) {
-        List<Document> docs = ids.stream().map(id->store.getOrDefault(id, new Document(""))).toList();
+
+    public List<Document> getParentChunk(List<String> ids) {
+        List<Document> docs = ids.stream().map(id -> store.getOrDefault(id, new Document(""))).toList();
         return docs;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record DocumentDTO(
+            String id,
+            String text,
+            Map<String, Object> metadata
+    ) {
     }
 
     @PostConstruct
     public void load() {
         if (Files.exists(storePath)) {
             try {
-                Map<String, String> raw = objectMapper.readValue(
+                Map<String, DocumentDTO> raw = objectMapper.readValue(
                         storePath.toFile(),
                         new TypeReference<>() {
                         }
                 );
-                raw.forEach((k, v) -> store.put(k, new Document(v)));
+                Map<String, Document> documents = raw.entrySet().stream()
+                        .collect(Collectors.toMap(
+                                Map.Entry::getKey,
+                                e -> Document.builder()
+                                        .id(e.getValue().id())
+                                        .text(e.getValue().text())
+                                        .metadata(e.getValue().metadata())
+                                        .build()
+                        ));
+                store.putAll(documents);
             } catch (IOException e) {
                 // 启动时没有文件也没关系
             }
@@ -138,8 +158,7 @@ public class RagChunkMapperImpl implements RagChunkMapper {
     private void persist() {
         try {
             Files.createDirectories(storePath.getParent());
-            Map<String, String> raw = new HashMap<>();
-            store.forEach((k, v) -> raw.put(k, v.getText()));
+            Map<String, Document> raw = new HashMap<>(store);
             objectMapper.writeValue(storePath.toFile(), raw);
         } catch (IOException e) {
             throw new RuntimeException("Failed to persist parent chunks", e);
