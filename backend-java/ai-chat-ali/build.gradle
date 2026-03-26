@@ -44,7 +44,6 @@ dependencies {
     implementation 'com.alibaba.cloud.ai:spring-ai-alibaba-agent-framework'
     implementation 'com.alibaba.cloud.ai:spring-ai-alibaba-starter-dashscope'
 
-    implementation 'com.alibaba.cloud.ai:spring-ai-alibaba-studio:1.1.2.0'
     // Source: https://mvnrepository.com/artifact/io.zipkin.reporter2/zipkin-reporter-brave
 //    implementation("io.zipkin.reporter2:zipkin-reporter-brave:3.5.1")
     implementation 'org.springframework.ai:spring-ai-starter-model-openai'
@@ -59,82 +58,17 @@ tasks.named('test') {
 }
 
 // ============================================================
-// 前端构建任务：构建 agent-chat-ui 并复制到 Spring Boot 静态资源
+// 前端静态资源：直接从 frontend/ 目录复制到 Spring Boot classpath:/static/
+// bootRun 和 bootJar 均自动包含，无需 Node.js / pnpm 环境
 // ============================================================
-
-def frontendDir = file("${rootDir}/../agent-chat-ui")
-def frontendOutDir = file("${frontendDir}/out")
-// 放到 META-INF/resources/chatui/ 与 Studio JAR 同路径，确保本地资源覆盖 JAR 内的
-def staticChatuiDir = file("${projectDir}/src/main/resources/META-INF/resources/chatui")
-// 旧版前端目录（Studio JAR 默认的），必须清除以免覆盖新 UI
-def legacyChatuiDir = file("${projectDir}/src/main/resources/static/chatui")
-def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
-
-// 检测包管理器：优先 pnpm，其次 npm
-def detectPkgManager() {
-    try {
-        def cmd = System.getProperty('os.name').toLowerCase().contains('windows')
-            ? ['cmd', '/c', 'pnpm', '--version']
-            : ['pnpm', '--version']
-        def proc = cmd.execute()
-        proc.waitFor()
-        if (proc.exitValue() == 0) return 'pnpm'
-    } catch (ignored) {}
-    return 'npm'
-}
-
-task frontendInstall(type: Exec) {
-    description = '安装前端依赖'
-    group = 'frontend'
-    workingDir frontendDir
-    def pm = detectPkgManager()
-    if (isWindows) {
-        commandLine 'cmd', '/c', pm, 'install'
-    } else {
-        commandLine pm, 'install'
-    }
-    inputs.file("${frontendDir}/package.json")
-    outputs.dir("${frontendDir}/node_modules")
-}
-
-task frontendBuild(type: Exec) {
-    description = '构建前端静态文件（STATIC_EXPORT 模式）'
-    group = 'frontend'
-    dependsOn frontendInstall
-    workingDir frontendDir
-    def pm = detectPkgManager()
-    environment 'STATIC_EXPORT', 'true'
-    if (isWindows) {
-        commandLine 'cmd', '/c', pm, 'run', 'build'
-    } else {
-        commandLine pm, 'run', 'build'
-    }
-    inputs.dir("${frontendDir}/src")
-    inputs.file("${frontendDir}/next.config.mjs")
-    inputs.file("${frontendDir}/package.json")
-    outputs.dir(frontendOutDir)
-}
-
-task frontendClean(type: Delete) {
-    description = '清理旧前端资源（static/chatui 和 META-INF 目标目录）'
-    group = 'frontend'
-    delete staticChatuiDir, legacyChatuiDir
-}
 
 clean {
     delete file("${projectDir}/ai-chat-boot")
 }
 
-task frontendCopy(type: Copy) {
-    description = '复制前端构建产物到 Spring Boot 静态资源目录'
-    group = 'frontend'
-    dependsOn frontendClean, frontendBuild
-    from frontendOutDir
-    into staticChatuiDir
+processResources {
+    from("${rootDir}/../../frontend") { into("static") }
 }
-
-// 让 processResources 依赖前端构建，这样 bootJar/bootRun 都会自动触发
-processResources.dependsOn frontendCopy
 
 // ============================================================
 // Application 插件配置（用于 dist 打包任务）

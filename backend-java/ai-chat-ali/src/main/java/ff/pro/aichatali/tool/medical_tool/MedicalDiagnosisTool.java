@@ -1,4 +1,4 @@
-package ff.pro.aichatali.tool;
+package ff.pro.aichatali.tool.medical_tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

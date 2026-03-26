@@ -1,4 +1,4 @@
-package ff.pro.aichatali.tool;
+package ff.pro.aichatali.tool.feiyan_tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,15 +17,15 @@ import java.util.function.BiFunction;
  * Calls a Python CNN service to classify chest X-ray images.
  * Falls back to a mock result when the service is unavailable.
  */
-public class PneumoniaRecognitionTool implements BiFunction<String, ToolContext, String> {
+public class FeiyanCnnTool implements BiFunction<String, ToolContext, String> {
 
-    private static final Logger log = LoggerFactory.getLogger(PneumoniaRecognitionTool.class);
+    private static final Logger log = LoggerFactory.getLogger(FeiyanCnnTool.class);
 
     private final MedicalToolConfig config;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public PneumoniaRecognitionTool(MedicalToolConfig config, RestTemplate restTemplate) {
+    public FeiyanCnnTool(MedicalToolConfig config, RestTemplate restTemplate) {
         this.config = config;
         this.restTemplate = restTemplate;
     }

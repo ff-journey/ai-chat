@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>喵喵智能助手</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Zcool+KuaiLe&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-light.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+</head>
+<body>
+<div id="app" class="app-wrapper">
+
+    <!-- ═══ Sidebar ═══════════════════════════════════════════════════════════ -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo-icon">🐱</div>
+            <h2>喵喵助手</h2>
+        </div>
+        <nav class="sidebar-nav">
+            <button @click="handleNewChat" :class="['nav-btn', {active: activeNav === 'newChat'}]">
+                <i class="fas fa-plus"></i> 新建会话
+            </button>
+            <button @click="handleHistory" :class="['nav-btn', {active: activeNav === 'history'}]">
+                <i class="fas fa-history"></i> 历史记录
+            </button>
+            <button @click="handleSettings" :class="['nav-btn', {active: activeNav === 'settings'}]">
+                <i class="fas fa-cog"></i> 文档管理
+            </button>
+        </nav>
+        <div class="sidebar-footer">
+            <button @click="handleClearChat" class="danger-btn">
+                <i class="fas fa-trash-alt"></i> 清空当前对话
+            </button>
+        </div>
+    </aside>
+
+    <!-- ═══ Main Content ══════════════════════════════════════════════════════ -->
+    <main class="main-content">
+
+        <!-- ─── Settings / Document Management ──────────────────────────────── -->
+        <div v-if="activeNav === 'settings'" class="settings-panel">
+            <div class="settings-header">
+                <h2><i class="fas fa-database"></i> 文档管理</h2>
+                <p>上传 PDF 文档进行向量化，作为知识库供 RAG 检索使用</p>
+            </div>
+
+            <!-- Upload -->
+            <div class="upload-section">
+                <h3><i class="fas fa-upload"></i> 上传文档</h3>
+                <div class="upload-area">
+                    <input type="file" ref="docFileInput" @change="handleFileSelect"
+                           accept=".pdf" style="display:none" />
+                    <button @click="$refs.docFileInput.click()" class="upload-btn">
+                        <i class="fas fa-cloud-upload-alt"></i> 选择 PDF 文件
+                    </button>
+                    <div v-if="selectedFile" class="selected-file">
+                        <i class="fas fa-file-pdf"></i>
+                        <span>{{ selectedFile.name }}</span>
+                        <span v-if="isDuplicate(selectedFile.name)" class="dup-warn">⚠ 已存在</span>
+                        <button @click="uploadDocument" class="btn-primary" :disabled="isUploading || isDuplicate(selectedFile.name)">
+                            <i class="fas fa-upload"></i> {{ isUploading ? '上传中...' : '开始上传' }}
+                        </button>
+                    </div>
+                    <div v-if="uploadProgress" class="upload-progress">{{ uploadProgress }}</div>
+                </div>
+            </div>
+
+            <!-- Document list -->
+            <div class="documents-section">
+                <h3><i class="fas fa-list"></i> 已上传文档</h3>
+                <button @click="loadDocuments" class="btn-secondary">
+                    <i class="fas fa-sync"></i> 刷新
+                </button>
+                <div v-if="documentsLoading" class="loading-indicator">加载中...</div>
+                <div v-else-if="documents.length === 0" class="empty-documents">
+                    <i class="fas fa-inbox"></i>
+                    <p>暂无文档</p>
+                </div>
+                <div v-else class="documents-list">
+                    <div v-for="doc in documents" :key="doc.filename" class="document-item">
+                        <div class="document-info">
+                            <div class="document-icon">
+                                <i :class="getFileIcon(doc.fileType)"></i>
+                            </div>
+                            <div class="document-details">
+                                <div class="document-name">{{ doc.originalFilename || doc.filename }}</div>
+                                <div class="document-meta">
+                                    <span class="doc-type-badge">{{ doc.fileType }}</span>
+                                    <span>{{ formatSize(doc.sizeBytes) }}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <button @click="deleteDocument(doc.filename)" class="btn-danger" title="删除文档">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─── History Sidebar ───────────────────────────────────────────────── -->
+        <div v-if="showHistorySidebar" class="history-sidebar">
+            <div class="history-header">
+                <h3>历史会话</h3>
+                <button @click="showHistorySidebar = false" class="close-btn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="history-list">
+                <div v-if="sessions.length === 0" class="empty-history">
+                    <p>暂无历史记录</p>
+                </div>
+                <div v-for="session in sessions" :key="session.sessionId"
+                     class="history-item"
+                     :class="{active: session.sessionId === sessionId}">
+                    <div class="session-body" @click="loadSession(session.sessionId)">
+                        <div class="session-info">
+                            <div class="session-title">{{ session.title || session.sessionId }}</div>
+                            <div class="session-meta">
+                                <span>{{ session.messageCount }} 条消息</span>
+                                <span v-if="session.updatedAt">{{ formatSessionTime(session.updatedAt) }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="history-delete-btn" title="删除"
+                            @click.stop="deleteSession(session.sessionId)">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─── Chat Area ─────────────────────────────────────────────────────── -->
+        <div v-show="activeNav !== 'settings'" class="chat-area">
+            <header class="chat-header">
+                <div class="header-info">
+                    <div class="status-dot"></div>
+                    <span>喵喵在线中...</span>
+                </div>
+                <div class="header-actions">
+                    <button class="icon-btn" title="更多"><i class="fas fa-ellipsis-h"></i></button>
+                </div>
+            </header>
+
+            <!-- Messages -->
+            <div class="chat-container" ref="chatContainer">
+                <div v-if="messages.length === 0" class="welcome-screen">
+                    <div class="big-avatar">🐟</div>
+                    <h3>你好呀！我是喵喵</h3>
+                    <p>我可以帮你分析胸部X光、检索知识库、回答医疗问题，或只是陪你聊天 喵！</p>
+                </div>
+
+                <div v-for="(msg, index) in messages" :key="index"
+                     :class="['message', msg.isUser ? 'user-message' : 'bot-message']">
+
+                    <!-- User message: image thumbnail + text -->
+                    <template v-if="msg.isUser">
+                        <div v-if="msg.imageUrl" class="msg-image-wrap">
+                            <img :src="msg.imageUrl" class="msg-image" alt="附件图片" />
+                        </div>
+                        <div v-if="msg.text" class="message-content"
+                             v-html="escapeHtml(msg.text)"></div>
+                    </template>
+
+                    <!-- Bot: thinking state -->
+                    <template v-else-if="msg.isThinking && !msg.text">
+                        <div class="message-content thinking-content">
+                            <div class="thinking-header">
+                                <div class="thinking-dots">
+                                    <span class="tdot"></span>
+                                    <span class="tdot"></span>
+                                    <span class="tdot"></span>
+                                </div>
+                                <span class="thinking-text">
+                                    {{ msg.ragSteps && msg.ragSteps.length
+                                       ? msg.ragSteps[msg.ragSteps.length - 1].label
+                                       : '正在思考中...' }}
+                                </span>
+                            </div>
+                            <div v-if="msg.ragSteps && msg.ragSteps.length" class="thinking-trace-lines">
+                                <div v-for="(step, si) in msg.ragSteps" :key="si" class="thinking-trace-line">
+                                    <span class="thinking-trace-icon">{{ step.icon || '▶' }}</span>
+                                    <span class="thinking-trace-label">{{ step.label }}</span>
+                                    <span v-if="step.detail" class="thinking-trace-detail">{{ step.detail }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Bot: response text -->
+                    <template v-else-if="!msg.isUser">
+                        <!-- Tool-call badge(s) -->
+                        <div v-if="msg.toolEvents && msg.toolEvents.length" class="tool-events-row">
+                            <span v-for="(tc, ti) in msg.toolEvents" :key="ti" class="tool-event-badge">
+                                <i class="fas fa-cog"></i> 工具调用完成
+                            </span>
+                        </div>
+                        <div class="message-content"
+                             v-html="parseMarkdown(msg.text)"></div>
+                        <!-- RAG trace (collapsible) -->
+                        <div v-if="msg.ragTrace" class="message-meta">
+                            <details class="reasoning-details">
+                                <summary>检索过程</summary>
+                                <div class="reasoning-content">
+                                    <div class="trace-line">工具：{{ msg.ragTrace.tool_used ? msg.ragTrace.tool_name : '未使用' }}</div>
+                                    <div v-if="msg.ragTrace.retrieval_stage" class="trace-line">检索阶段：{{ msg.ragTrace.retrieval_stage }}</div>
+                                    <div v-if="msg.ragTrace.grade_score" class="trace-line">相关性评分：{{ msg.ragTrace.grade_score }}</div>
+                                    <div v-if="msg.ragTrace.retrieved_chunks && msg.ragTrace.retrieved_chunks.length" class="sources">
+                                        <div class="sources-title">检索结果</div>
+                                        <ul class="sources-list">
+                                            <li v-for="(chunk, ci) in msg.ragTrace.retrieved_chunks" :key="ci" class="source-item">
+                                                <div class="source-title-line">
+                                                    <span class="source-file">{{ chunk.filename }}</span>
+                                                    <span v-if="chunk.page_number" class="source-page">第 {{ chunk.page_number }} 页</span>
+                                                </div>
+                                                <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </details>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- ─── Input Area ─────────────────────────────────────────────── -->
+            <div class="input-area-wrapper">
+
+                <!-- Image preview (uploaded or sample) -->
+                <div v-if="hasAttachment" class="image-preview-area">
+                    <img :src="chatImagePreviewUrl" class="input-image-preview" alt="待发送图片" />
+                    <div class="image-preview-info">
+                        <span v-if="selectedSample" class="preview-label">
+                            样本: {{ selectedSample.category }} / {{ selectedSample.filename }}
+                        </span>
+                        <span v-else class="preview-label">{{ selectedChatImage && selectedChatImage.name }}</span>
+                    </div>
+                    <button @click="clearChatImage" class="clear-image-btn" title="移除图片">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+
+                <!-- Tool chips -->
+                <div v-if="availableTools.length > 0" class="tools-bar">
+                    <span class="tools-bar-label">工具:</span>
+                    <button v-for="tool in displayedTools" :key="tool.name"
+                            @click="toggleTool(tool.name)"
+                            :class="['tool-chip', {active: enabledTools.includes(tool.name)}]"
+                            :title="tool.description">
+                        <i :class="toolIcon(tool.name)"></i>
+                        {{ toolDisplayName(tool.name) }}
+                    </button>
+                    <!-- More tools popup trigger -->
+                    <div v-if="extraTools.length > 0" class="tool-more-wrap">
+                        <button @click="showToolPicker = !showToolPicker" class="tool-chip tool-chip-more">
+                            <i class="fas fa-ellipsis-h"></i> +{{ extraTools.length }}
+                        </button>
+                        <div v-if="showToolPicker" class="tool-picker-popup" @click.stop>
+                            <button v-for="tool in extraTools" :key="tool.name"
+                                    @click="toggleTool(tool.name)"
+                                    :class="['tool-chip', {active: enabledTools.includes(tool.name)}]"
+                                    :title="tool.description">
+                                <i :class="toolIcon(tool.name)"></i>
+                                {{ toolDisplayName(tool.name) }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Input row -->
+                <div class="input-area" @click="showToolPicker = false">
+                    <!-- Hidden file inputs -->
+                    <input type="file" ref="chatImageInput" @change="handleChatImageSelect"
+                           accept="image/*" style="display:none" />
+
+                    <button @click="openChatImagePicker" class="attach-btn" title="上传图片">
+                        <i class="fas fa-image"></i>
+                    </button>
+                    <button @click="openSamplePicker" class="attach-btn sample-btn" title="选择样本图片">
+                        <i class="fas fa-microscope"></i>
+                    </button>
+                    <textarea
+                        v-model="userInput"
+                        @keydown="handleKeyDown"
+                        @compositionstart="handleCompositionStart"
+                        @compositionend="handleCompositionEnd"
+                        @input="autoResize"
+                        placeholder="输入消息... (Shift+Enter 换行)"
+                        rows="1"
+                        ref="textarea"
+                    ></textarea>
+                    <button v-if="isLoading" @click="handleStop" class="send-btn stop-btn" title="停止">
+                        <i class="fas fa-stop"></i>
+                    </button>
+                    <button v-else @click="handleSend" class="send-btn" title="发送">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+                <div class="footer-text">AI 生成的内容可能包含错误，请仔细甄别。</div>
+            </div>
+        </div>
+        <!-- End Chat Area -->
+
+    </main>
+
+    <!-- ═══ Sample Picker Modal ═══════════════════════════════════════════════ -->
+    <div v-if="showSamplePicker" class="modal-overlay" @click.self="showSamplePicker = false">
+        <div class="sample-picker-modal">
+            <div class="modal-header">
+                <h3><i class="fas fa-microscope"></i> 选择样本图片</h3>
+                <button @click="showSamplePicker = false" class="close-btn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div v-if="sampleCategories.length === 0" class="loading-indicator">加载中...</div>
+                <div v-for="cat in sampleCategories" :key="cat.category" class="sample-category">
+                    <div class="sample-category-label">
+                        <span class="cat-dot" :class="'cat-' + cat.category"></span>
+                        {{ cat.label }}
+                    </div>
+                    <div class="sample-grid">
+                        <div v-for="img in cat.images" :key="img.filename"
+                             class="sample-item"
+                             :class="{selected: selectedSample && selectedSample.category === cat.category && selectedSample.filename === img.filename}"
+                             @click="selectSample(cat.category, img.filename)">
+                            <img :src="`/api/samples/${cat.category}/${img.filename}`"
+                                 :alt="img.filename" loading="lazy" />
+                            <div class="sample-item-name">{{ img.filename }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div><!-- #app -->
+
+<script src="script.js"></script>
+</body>
+</html>

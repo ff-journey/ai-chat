@@ -1,72 +1,38 @@
-# CLAUDE.md
+# CLAUDE.md — backend-java
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This directory contains the Java backend and its frontend SPA.
 
-## Build & Run
+## Modules
+
+| Module | Status | Description |
+|---|---|---|
+| `ai-chat-ali/` | **Active** | Spring Boot backend + Vue3 CDN frontend |
+| `agent-chat-ui/` | **Legacy** | Next.js debug UI (superseded, not used in production) |
+
+For detailed guidance on each module, see:
+- `backend-java/ai-chat-ali/CLAUDE.md` — primary reference for all backend work
+- `backend-java/agent-chat-ui/CLAUDE.md` — legacy module notes
+
+## Quick Start
 
 ```bash
+# Start the full application (backend + frontend)
 cd backend-java/ai-chat-ali
-
-# Run the app (serves on port 8080)
 ./gradlew bootRun
-
-# Build JAR
-./gradlew build
-
-# Run tests
-./gradlew test
+# → http://localhost:8080
 ```
 
-After startup, the Studio debug UI is available at `http://localhost:8080/chatui/index.html`.
+Required env var: `AI_DASHSCOPE_API_KEY`
 
-## Environment
+Optional: start Python inference service first if pneumonia classification is needed:
+```bash
+cd backend-python/model_interface
+python main.py   # → http://127.0.0.1:9801
+```
 
-- Java 21 (Alibaba Dragonwell or standard JDK)
-- Gradle 9.3.1 (wrapper included)
-- Required env var: `AI_DASHSCOPE_API_KEY` — used by both Spring config and standalone demos
+## Frontend
 
-## Architecture
+The frontend is a **Vue3 CDN SPA** located in `frontend/` (project root level).
+Gradle copies it into `classpath:/static/` at build time — no Node.js or pnpm required.
 
-This is a Spring Boot 3.5.11 app using **Spring AI Alibaba** (`spring-ai-alibaba-agent-framework` + `spring-ai-alibaba-starter-dashscope`) to build a multi-agent chat system backed by Alibaba Dashscope (default model: `qwen-turbo`).
-
-### Multi-Agent Supervisor Pattern
-
-Defined in `config/AgentConfig.java`, three `ReactAgent` beans form a delegation hierarchy:
-
-- **`supervisor_agent`** — top-level router. Receives all user requests and delegates via tool calls:
-  - `weather_agent` tool → for weather/location queries
-  - `chat_agent` tool → for general conversation
-- **`weather_agent`** — has a `get_weather` tool, uses `MemorySaver` for conversation state
-- **`chat_agent`** — general-purpose assistant, no tools, uses `MemorySaver`
-
-Sub-agents are wrapped as `FunctionToolCallback` so the supervisor invokes them as tool calls. Each agent gets its own fixed `threadId` for memory isolation (`supervisor-weather`, `supervisor-chat`).
-
-### API Endpoints
-
-`controller/ChatStreamController.java` exposes:
-- `GET /api/chat/stream?message=...&threadId=...` — SSE streaming via `supervisorAgent.stream()`
-- `POST /api/chat/send?message=...&threadId=...` — synchronous call via `supervisorAgent.call()`
-
-### Studio Integration
-
-The `spring-ai-alibaba-studio` dependency provides an embedded debug UI at `/chatui`. It auto-discovers all `ReactAgent` beans via `ContextScanningAgentLoader`. See `docs/studio-integration-guide.md` for the full SSE protocol, REST API, and extension points (custom `AgentLoader`, `GraphLoader`, `ThreadService`).
-
-### Standalone Demo
-
-`single_demo/SingleAgent.java` is a self-contained example (has its own `main()`) that demonstrates `ReactAgent` with streaming, tool interceptors, and `ToolContext` metadata — runs independently of Spring context.
-
-## Key Patterns
-
-- All agents use `MemorySaver` for in-memory conversation persistence (not durable across restarts)
-- Streaming uses Reactor `Flux<NodeOutput>` — filter for `StreamingOutput` and check `OutputType` (AGENT_MODEL_STREAMING, AGENT_MODEL_FINISHED, AGENT_TOOL_FINISHED)
-- UTF-8 encoding is explicitly set in `build.gradle` JVM args for international support
-- BOM versions are pinned: `spring-ai-alibaba-bom:1.1.2.2`, `spring-ai-bom:1.1.2`
-
-## Dependencies
-
-Core dependencies (managed via BOMs):
-- `spring-ai-alibaba-agent-framework` — ReactAgent, graph runtime, checkpoint savers
-- `spring-ai-alibaba-starter-dashscope` — auto-configures `ChatModel` for Dashscope
-- `spring-ai-alibaba-studio` — embedded debug UI
-- `spring-boot-starter-web` — REST endpoints
-- Lombok — compile-only
+The `agent-chat-ui/` Next.js module is no longer part of the active build.

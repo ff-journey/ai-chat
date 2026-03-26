@@ -1,4 +1,4 @@
-package ff.pro.aichatali.tool;
+package ff.pro.aichatali.tool.feiyan_tool;
 
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
@@ -19,11 +19,11 @@ public class FeiyanAgentMedicalTool implements BiFunction<FeiyanAgentMedicalTool
 
     public record Input(String query) {}
 
-    private final PneumoniaRecognitionTool pneumoniaRecognitionTool;
+    private final FeiyanCnnTool feiyanCnnTool;
     private final ReactAgent medicalAgent;
 
     public FeiyanAgentMedicalTool(MedicalToolConfig config, RestTemplate restTemplate, ReactAgent medicalAgent) {
-        this.pneumoniaRecognitionTool = new PneumoniaRecognitionTool(config, restTemplate);
+        this.feiyanCnnTool = new FeiyanCnnTool(config, restTemplate);
         this.medicalAgent = medicalAgent;
     }
 
@@ -38,7 +38,7 @@ public class FeiyanAgentMedicalTool implements BiFunction<FeiyanAgentMedicalTool
         }
 
         // Step 1: CNN 分类
-        String cnnResult = pneumoniaRecognitionTool.apply(input, toolContext);
+        String cnnResult = feiyanCnnTool.apply(input, toolContext);
 
         // Step 2: 将分类结果连同用户问题交给医疗专家
         String medicalInput = "用户问题：" + input + "\n胸片诊断分析：" + cnnResult;
