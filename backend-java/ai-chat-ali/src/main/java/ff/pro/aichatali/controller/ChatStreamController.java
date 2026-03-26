@@ -537,7 +537,7 @@ public class ChatStreamController {
 
 
     @GetMapping("/any/test")
-    public void anyTest() {
-        hybridRetrieverService.apply(new MemoryHybridRetrieverService.Input("检索文档, 血糖控制不好的老年糖尿病患者，HbA1c 目标值应该放宽到多少？"), null);
+    public void anyTest(@RequestParam String query) {
+        hybridRetrieverService.apply(new MemoryHybridRetrieverService.Input(query), null);
     }
 }

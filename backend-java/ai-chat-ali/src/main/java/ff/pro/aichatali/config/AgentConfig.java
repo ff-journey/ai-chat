@@ -190,7 +190,9 @@ public class AgentConfig {
                 .build();
         FunctionToolCallback<MemoryHybridRetrieverService.Input, Map<String, String>> memoryRagTool =
                 FunctionToolCallback.builder("ragTool", memoryHybridRetrieverService)
-                .description("从知识库中检索相关文档，当用户需要检索知识库时调用")
+                .description("内部知识库检索工具。所有问题默认先调用此工具。\n" +
+                        "    包含内部业务文档、规则、产品说明等私域内容。\n" +
+                        "    结果为空时才考虑联网搜索。")
                 .inputType(MemoryHybridRetrieverService.Input.class)
                 .build();
         var prompt = """
@@ -213,7 +215,7 @@ public class AgentConfig {
                  - 如果医疗诊断结果病情信息不足, 可主动询问用户更多细节
                 """;
         prompt = prompt.replace("{{current_time}}",
-                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd ")));
         return ReactAgent.builder()
                 .name("supervisor_agent")
                 .model(dashScopeChatModel)

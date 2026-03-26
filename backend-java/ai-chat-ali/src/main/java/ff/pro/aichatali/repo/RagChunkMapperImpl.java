@@ -13,6 +13,7 @@ import io.milvus.response.QueryResultsWrapper;
 import io.milvus.response.SearchResultsWrapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Repository;
 
@@ -26,6 +27,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Repository
 @RequiredArgsConstructor
 public class RagChunkMapperImpl implements RagChunkMapper {
@@ -151,6 +153,7 @@ public class RagChunkMapperImpl implements RagChunkMapper {
                 store.putAll(documents);
             } catch (IOException e) {
                 // 启动时没有文件也没关系
+                log.error("Failed to load parent chunks", e);
             }
         }
     }

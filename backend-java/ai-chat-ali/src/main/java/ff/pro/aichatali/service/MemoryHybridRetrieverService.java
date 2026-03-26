@@ -1,21 +1,22 @@
 package ff.pro.aichatali.service;
 
+import ff.pro.aichatali.common.ThreadPoolHelper;
 import ff.pro.aichatali.repo.RagChunkMapper;
 import ff.pro.aichatali.repo.RagChunkPo;
 import ff.pro.aichatali.service.rag.BM25Service;
 import ff.pro.aichatali.service.rag.RRFMerger;
+import ff.pro.aichatali.service.websearch.WebSearchPort;
+import jdk.jfr.Enabled;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.vectorstore.SearchRequest;
-import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -39,44 +40,60 @@ public class MemoryHybridRetrieverService implements BiFunction<MemoryHybridRetr
     final RerankService rerankService;
     final GradingService gradingService;
     final QueryRewriter queryRewriter;
+    final WebSearchPort webSearchPort;
 
 
     private Map<String, String> memoryHybridRetriever(String query) {
 
-        List<Document> reranked = hybridRetrieverAndRrfAndRerank(query, 0);
-//        reranked = gradingService.filterRelevant(query, reranked);
-        if (reranked.size() < 2) {
-            // 两种策略都试，取 union
+        List<Document> reranked = hybridRetrieverAndRrfAndRerank(query, 0.3f, false);
+        if (reranked.size() < 3) {
+            // query rewrite
+            log.info("query rewrite <------------->");
             String stepBackQuery = queryRewriter.stepBack(query);
-//            String hydeDoc = queryRewriter.hyde(query);
-
-            reranked = hybridRetrieverAndRrfAndRerank(stepBackQuery, 0);  // 用改写后的 query 检索
-//            List<Document> r2 = hybridRetrieverAndRrfAndRerank(hydeDoc, 0);
-            // 合并去重，不再走 grading（避免死循环）
-//            reranked = Stream.concat(r1.stream(), r2.stream())
-//                    .collect(Collectors.toMap(
-//                            d -> d.getMetadata().get("chunk_id").toString(),
-//                            d -> d, (a, b) -> a))
-//                    .values().stream().limit(5).toList();
+            reranked = hybridRetrieverAndRrfAndRerank(stepBackQuery, 0, true);  // 用改写后的 query 检索
         }
         //升级合并, 超过阈值则升级为上层块
-        List<Document> mergeChunks = autoMerge(reranked, 2);
-        List<Document> finalChunks = parentFirst(mergeChunks, 6);
+
+        List<Document> finalChunks = parentFirst(reranked, 6);
         String content = finalChunks.stream().map(Document::getText).filter(StringUtils::isNotBlank).collect(Collectors.joining("\n\n---\n\n"));
         return Map.of("result", StringUtils.isNotBlank(content) ? content : "未查询到相关内容");
     }
 
-    private List<Document> hybridRetrieverAndRrfAndRerank(String query, float rerankScore) {
-        List<RagChunkPo> denseChunks = ragChunkMapper.searchByVector(embeddingService.embed(query), 20, null);
+    private List<Document> hybridRetrieverAndRrfAndRerank(String query, float rerankScore, boolean enableWeb) {
+        // 三路并行：Dense / BM25 / Web Search
+        CompletableFuture<List<Document>> denseFuture = CompletableFuture.supplyAsync(() -> {
+            List<RagChunkPo> chunks = ragChunkMapper.searchByVector(embeddingService.embed(query), 20, null);
+            return chunks.stream().map(RagChunkPo::getDocument).toList();
+        }, ThreadPoolHelper.EXECUTOR_SERVICE);
 
-        List<Document> sparseDoc = bm25Service.search(query, 20);
+        CompletableFuture<List<Document>> bm25Future = CompletableFuture.supplyAsync(
+                () -> bm25Service.search(query, 20),
+                ThreadPoolHelper.EXECUTOR_SERVICE);
+        CompletableFuture<List<Document>> webFuture = null;
+        List<Document> webDoc = Collections.emptyList();
+        if (enableWeb) {
+            webFuture = CompletableFuture.supplyAsync(
+                    () -> webSearchPort.search(query, 3),
+                    ThreadPoolHelper.EXECUTOR_SERVICE);
+        }
 
-        List<Document> denseDoc = denseChunks.stream().map(RagChunkPo::getDocument).toList();
-        // rrf融合
-        List<Document> rrfDoc = rrfMerger.merge(denseDoc, sparseDoc, 20);
-        // Rerank 精排（20→10），在 auto-merge 之前
-        List<Document> reranked = rerankService.rerank(query, rrfDoc, 10, rerankScore);
-        return reranked;
+        CompletableFuture<Void> allFutures = enableWeb
+                ? CompletableFuture.allOf(denseFuture, bm25Future, webFuture)
+                : CompletableFuture.allOf(denseFuture, bm25Future);
+        allFutures.join();
+
+
+
+        List<Document> denseDoc = denseFuture.join();
+        List<Document> sparseDoc = bm25Future.join();
+        webDoc = enableWeb? webFuture.join() : Collections.emptyList();
+
+        log.debug("三路检索结果: dense={}, bm25={}, web={}", denseDoc.size(), sparseDoc.size(), webDoc.size());
+
+        // 三路 RRF 融合 → Rerank 精排（30→10）
+        List<Document> rrfDoc = rrfMerger.merge(20, denseDoc, sparseDoc, webDoc);
+        List<Document> mergeChunks = autoMerge(rrfDoc, 2);
+        return rerankService.rerank(query, mergeChunks, 10, rerankScore);
     }
 
     private int getLevel(Document d) {

@@ -7,6 +7,7 @@ spring:
       chat:
         options:
           model: qwen3-max
+#          model: qwen3.5-35b-a3b
       embedding:
         options:
           model: text-embedding-v4
@@ -61,3 +62,6 @@ logging:
     org.springframework.ai: DEBUG
 jina:
   api-key: ${JINA_API_KEY}
+
+tavily:
+  api-key: ${TAVILY_API_KEY}
