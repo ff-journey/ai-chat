@@ -10,8 +10,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 /**
- * 纯 vLLM 医疗问诊工具（不依赖 CNN，不依赖其他 Agent）。
- * 与 FeiyanPluggableTool 分离，可独立启用/禁用。
+ * 完整医疗诊断工具：有影像时自动调用 CNN 分类，再交给 vLLM CoT 模型推理。
+ * 纯文字问诊同样支持。与 pneumoniaCnnTool 的区别：本工具提供诊断推理，后者仅做影像分类。
  */
 @Component
 @ConditionalOnProperty(name = "tools.medical-diagnosis.enabled", havingValue = "true", matchIfMissing = false)
@@ -28,7 +28,7 @@ public class MedicalDiagnosisPluggableTool implements PluggableTool {
 
     @Override
     public String description() {
-        return "专业医疗问诊，根据患者描述的症状给出初步诊断建议（不替代专业医生）";
+        return "专业医疗诊断：根据患者症状和影像检查结果，进行系统性推理并给出诊断建议（不替代专业医生）";
     }
 
     @Override

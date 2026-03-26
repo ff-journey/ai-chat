@@ -62,17 +62,6 @@ public class AgentConfig {
                 .build();
     }
 
-    @Bean("medicalAgent")
-    public ReactAgent medicalAgent(@Qualifier("openAiChatModel") ChatModel chatModel) {
-        return ReactAgent.builder()
-                .name("medicalAgent")
-                .model(chatModel)
-                .description("专门负责医疗问诊，给出专业的医疗诊断")
-                .instruction("你是一个医学专家，你需要根据用户的问题，给出医疗诊断和建议")
-                .inputType(String.class)
-                .build();
-    }
-
     @Bean("supervisor_agent")
     public ReactAgent supervisorAgent(
             @Qualifier("dashScopeChatModel") ChatModel dashScopeChatModel,
@@ -83,9 +72,10 @@ public class AgentConfig {
                 你是一个优秀的私人助理, 任何动作前都会分析用户意图，并调用合适的工具。
                 任何动作前都首先分析用户意图, 并查看上下文是否已有足够信息做出直接回复。
                  工具选择规则：
-                 - 消息包含 [用户已上传胸部X光图片] 标记 → 必须调用肺炎分析工具
-                 - 用户咨询医疗问题、症状、用药、诊断建议（无图片标记）→ 在消息历史中汇总重要的病情信息后, 调用医疗问诊工具
-                 - 用户提到胸片、肺炎、影像分析但没有图片标记 → 调用医疗问诊工具，工具会告知用户需要上传图片
+                 - 消息包含 [用户已上传胸部X光图片] 且用户需要诊断建议/分析报告 → 调用 medical_diagnosis（内部自动读取影像）
+                 - 消息包含 [用户已上传胸部X光图片] 且用户只需快速判断是否肺炎 → 调用 pneumoniaCnnTool
+                 - 用户咨询医疗问题、症状、用药、诊断建议（无图片）→ 汇总病情信息后调用 medical_diagnosis
+                 - 用户提到胸片、肺炎、影像分析但没有图片标记 → 调用 medical_diagnosis，工具会告知用户需要上传图片
                  - 用户进行日常闲聊、问候、或非医疗类问题 → 调用普通对话工具
                  - 无法判断意图时 → 视为普通聊天, 可自行回复
 

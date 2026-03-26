@@ -1,20 +1,17 @@
 package ff.pro.aichatali.tool.feiyan_tool;
 
-import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import ff.pro.aichatali.config.MedicalToolConfig;
 import ff.pro.aichatali.tool.PluggableTool;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.function.FunctionToolCallback;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 /**
- * CNN 肺炎影像分析 + 医疗专家 Agent 联合工具。
- * medicalAgent 通过 @Lazy 注入，避免与 supervisorAgent 产生循环依赖。
+ * 胸部 X 光 CNN 快速分类工具（仅分类，不做诊断解释）。
+ * 需要完整诊断报告时请使用 medical_diagnosis 工具。
  */
 @Component
 @ConditionalOnProperty(name = "tools.pneumonia.enabled", havingValue = "true", matchIfMissing = true)
@@ -26,23 +23,20 @@ public class FeiyanPluggableTool implements PluggableTool {
     @Autowired
     private RestTemplate medicalRestTemplate;
 
-    @Lazy
-    @Autowired
-    @Qualifier("medicalAgent")
-    private ReactAgent medicalAgent;
+    @Override
+    public String name() { return "pneumoniaCnnTool"; }
 
     @Override
-    public String name() { return "feiyanAgentMedicalTool"; }
-
-    @Override
-    public String description() { return "识别胸部X光影像，给出专业诊断报告"; }
+    public String description() {
+        return "胸部X光影像肺炎快速分类，返回是否肺炎及置信度。仅做影像分类，不提供诊断建议。";
+    }
 
     @Override
     public ToolCallback toolCallback() {
-        return FunctionToolCallback.builder("feiyanAgentMedicalTool",
-                new FeiyanAgentMedicalTool(medicalToolConfig, medicalRestTemplate, medicalAgent))
+        return FunctionToolCallback.builder("pneumoniaCnnTool",
+                new FeiyanCnnTool(medicalToolConfig, medicalRestTemplate))
                 .description(description())
-                .inputType(FeiyanAgentMedicalTool.Input.class)
+                .inputType(String.class)
                 .build();
     }
 }

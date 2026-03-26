@@ -79,6 +79,13 @@ body {
     border-radius: 50%;
     box-shadow: 0 4px 10px rgba(0,0,0,0.05);
     animation: bounce 3s infinite;
+    overflow: hidden;
+}
+
+.logo-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .sidebar-header h2 {
@@ -225,6 +232,11 @@ body {
     font-size: 5rem;
     margin-bottom: 20px;
     animation: float 3s ease-in-out infinite;
+}
+
+.big-avatar img {
+    height: 5rem;
+    width: auto;
 }
 
 .welcome-screen h3 {
@@ -442,6 +454,7 @@ textarea {
     outline: none;
     max-height: 100px;
     color: var(--text-color);
+    overflow-y: hidden;
 }
 
 .send-btn {

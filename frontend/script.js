@@ -101,6 +101,7 @@ createApp({
             const ta = e.target;
             ta.style.height = 'auto';
             ta.style.height = ta.scrollHeight + 'px';
+            ta.style.overflowY = ta.scrollHeight > 100 ? 'auto' : 'hidden';
         },
         resetTextareaHeight() {
             if (this.$refs.textarea) this.$refs.textarea.style.height = 'auto';
@@ -359,7 +360,7 @@ createApp({
                 const res = await fetch('/api/tools');
                 if (!res.ok) return;
                 this.availableTools = await res.json();
-                this.enabledTools   = this.availableTools.map(t => t.name);
+                this.enabledTools   = [];
             } catch (e) {
                 console.warn('Tool list unavailable:', e);
             }

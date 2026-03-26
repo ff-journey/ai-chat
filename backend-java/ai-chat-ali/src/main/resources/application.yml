@@ -59,11 +59,14 @@ tools:
   rag:
     enabled: true          # RagPluggableTool — 内部知识库检索
   websearch:
-    enabled: false         # WebSearchPluggableTool — 联网搜索（需要 TAVILY_API_KEY）
+    enabled: true         # WebSearchPluggableTool — 联网搜索（需要 TAVILY_API_KEY）
   pneumonia:
     enabled: true          # FeiyanPluggableTool — CNN 胸片分析 + 医疗诊断
   medical-diagnosis:
-    enabled: false         # MedicalDiagnosisPluggableTool — 纯 vLLM 医疗问诊（与 pneumonia 互斥时可独立启用）
+    enabled: true         # MedicalDiagnosisPluggableTool — 纯 vLLM 医疗问诊（与 pneumonia 互斥时可独立启用）
+  rag-agent:
+    enabled: false         # RagAgentPluggableTool — 混合检索子 Agent（启用时建议关闭 rag + websearch）
+    max-iterations: 5
 
 logging:
   level:
