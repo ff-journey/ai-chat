@@ -787,7 +787,7 @@ textarea {
     border: 2px dashed var(--primary-light);
 }
 
-.selected-file i {
+.selected-file > i {
     color: var(--primary-color);
     font-size: 1.5rem;
 }

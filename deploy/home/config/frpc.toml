@@ -1,0 +1,18 @@
+serverAddr = "ECS_PUBLIC_IP"
+serverPort = 7000
+auth.method = "token"
+auth.token = "CHANGE_ME"
+
+[[proxies]]
+name = "cnn"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 9801
+remotePort = 9801
+
+[[proxies]]
+name = "vllm"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 9901
+remotePort = 9901

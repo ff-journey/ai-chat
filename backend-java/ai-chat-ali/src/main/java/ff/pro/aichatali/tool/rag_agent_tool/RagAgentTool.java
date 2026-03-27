@@ -5,7 +5,7 @@ import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
-import ff.pro.aichatali.service.MemoryHybridRetrieverService;
+import ff.pro.aichatali.service.MilvusHybridRetrieverService;
 import ff.pro.aichatali.service.websearch.WebSearchTool;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -33,13 +33,13 @@ public class RagAgentTool implements BiFunction<RagAgentTool.Input, ToolContext,
     private final ReactAgent reactAgent;
 
     public RagAgentTool(ChatModel chatModel,
-                        MemoryHybridRetrieverService retrieverService,
+                        MilvusHybridRetrieverService retrieverService,
                         WebSearchTool webSearchTool,
                         int maxIterations) {
         ToolCallback docSearch = FunctionToolCallback
                 .builder("document_search", retrieverService)
                 .description("搜索内部知识库文档")
-                .inputType(MemoryHybridRetrieverService.Input.class)
+                .inputType(MilvusHybridRetrieverService.Input.class)
                 .build();
         ToolCallback webSearch = FunctionToolCallback
                 .builder("web_search", webSearchTool)

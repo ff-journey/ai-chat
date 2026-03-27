@@ -112,3 +112,72 @@ public interface PluggableTool {
 - Spring AI Alibaba BOM: `1.1.2.2`
 - Spring AI BOM: `1.1.2`
 - 默认模型: `qwen-turbo` (Dashscope)
+
+---
+
+## 部署架构
+
+```
+家里 Windows (3060Ti)                阿里云 ECS (Linux)
+┌─────────────────────────┐          ┌──────────────────────────┐
+│  Python CNN   :9801     │──frpc──▶ │  frps   :7000            │
+│  vLLM         :9901     │──frpc──▶ │  Java   :8080 (对外)     │
+└─────────────────────────┘  tunnel  └──────────────────────────┘
+```
+
+- **ECS**：运行 Java 后端（对外提供服务）+ frps（内网穿透服务端）
+- **家里**：运行 Python CNN（9801）+ vLLM（9901），通过 frpc 隧道暴露给 ECS
+- Java 后端调用 CNN/vLLM 时走 `127.0.0.1:9801 / 9901`，frp 透明转发到家里机器
+
+### 部署脚本
+
+```
+deploy/
+├── ecs/
+│   ├── java-app.sh          # bash java-app.sh start | stop
+│   ├── frps.sh              # bash frps.sh start | stop
+│   └── config/
+│       ├── .env.example     # 复制为 .env 并填值（已在 .gitignore）
+│       └── frps.toml        # frps 配置（填 auth.token）
+└── home/
+    ├── frpc.ps1             # .\frpc.ps1 start | stop
+    ├── cnn.ps1              # .\cnn.ps1 start | stop
+    └── config/
+        └── frpc.toml        # 填 serverAddr + auth.token，代理 9801/9901
+```
+
+### 首次部署操作流程
+
+#### ECS 端
+```bash
+# 1. 构建 JAR 并上传
+cd backend-java/ai-chat-ali && ./gradlew build
+scp build/libs/ai-chat-ali.jar user@ECS:~/deploy/ecs/../../backend-java/ai-chat-ali/build/libs/
+
+# 2. 配置环境变量
+cd deploy/ecs/config && cp .env.example .env
+# 填写 SILICONFLOW_API_KEY / ZILLIZ_HOST / ZILLIZ_TOKEN / TAVILY_API_KEY 等
+
+# 3. 配置 frps（填 auth.token）并启动
+vim frps.toml
+bash ../frps.sh start
+bash ../java-app.sh start
+```
+
+#### 家里端
+```powershell
+# 1. 填写 deploy\home\config\frpc.toml（serverAddr + auth.token 与 frps 一致）
+
+# 2. 启动 frpc 和 CNN 服务
+.\deploy\home\frpc.ps1 start
+.\deploy\home\cnn.ps1 start
+```
+
+### 日常操作速查
+
+| 操作 | 命令 |
+|---|---|
+| ECS 重启 Java | `bash java-app.sh stop && bash java-app.sh start` |
+| ECS 查看日志 | `tail -f deploy/ecs/java-app.log` |
+| 家里重启 frpc | `.\frpc.ps1 stop; .\frpc.ps1 start` |
+| 家里重启 CNN | `.\cnn.ps1 stop; .\cnn.ps1 start` |

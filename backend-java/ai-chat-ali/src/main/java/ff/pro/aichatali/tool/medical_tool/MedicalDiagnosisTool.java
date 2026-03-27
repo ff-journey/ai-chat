@@ -2,8 +2,8 @@ package ff.pro.aichatali.tool.medical_tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import ff.pro.aichatali.common.ToolResult;
 import ff.pro.aichatali.config.MedicalToolConfig;
-import ff.pro.aichatali.tool.feiyan_tool.FeiyanCnnTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
@@ -15,11 +15,18 @@ import java.util.Map;
 import java.util.function.BiFunction;
 
 /**
- * 完整医疗诊断工具：若有影像则先调 CNN 分类，再将结构化临床信息交给
- * vLLM（qwen3-0.6b，医疗 CoT LoRA）做逐步推理，最终返回推理链供
- * Supervisor LLM 整合后呈现给用户。
+ * 医疗诊断工具：将结构化临床信息交给 vLLM（qwen3-0.6b，医疗 CoT LoRA）做逐步推理，
+ * 返回推理链供 Supervisor LLM 整合后呈现给用户。
+ *
+ * 影像分类（CNN）已解耦，由 pneumoniaCnnTool 独立处理。
+ * 若已有影像检查结果，请将其填入 clinicalMaterials 字段一并传入。
  */
-public class MedicalDiagnosisTool implements BiFunction<String, ToolContext, String> {
+public class MedicalDiagnosisTool implements BiFunction<MedicalDiagnosisTool.Input, ToolContext, ToolResult> {
+
+    public record Input(
+            String patientInfo,
+            String clinicalMaterials
+    ) {}
 
     private static final Logger log = LoggerFactory.getLogger(MedicalDiagnosisTool.class);
 
@@ -34,33 +41,29 @@ public class MedicalDiagnosisTool implements BiFunction<String, ToolContext, Str
 
     private final MedicalToolConfig config;
     private final RestTemplate restTemplate;
-    private final FeiyanCnnTool cnnTool;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public MedicalDiagnosisTool(MedicalToolConfig config, RestTemplate restTemplate) {
         this.config = config;
         this.restTemplate = restTemplate;
-        this.cnnTool = new FeiyanCnnTool(config, restTemplate);
     }
 
     @Override
-    public String apply(String patientInfo, ToolContext toolContext) {
-        if (patientInfo == null || patientInfo.isBlank()) {
-            return "{\"error\": \"No patient information provided.\"}";
+    public ToolResult apply(Input input, ToolContext toolContext) {
+        if (input == null || (isBlank(input.patientInfo()) && isBlank(input.clinicalMaterials()))) {
+            return ToolResult.error("No patient information provided.");
         }
 
-        // 如果上下文中有影像，先做 CNN 分类，把结果拼入结构化 query
         StringBuilder structuredQuery = new StringBuilder();
-        Object img = toolContext != null && toolContext.getContext() != null
-                ? toolContext.getContext().get("uploaded_image_path") : null;
-        if (img != null) {
-            String cnnResult = cnnTool.apply(patientInfo, toolContext);
-            structuredQuery.append("【影像检查结果】\n").append(cnnResult).append("\n\n");
+        if (!isBlank(input.clinicalMaterials())) {
+            structuredQuery.append("【检查材料】\n").append(input.clinicalMaterials()).append("\n\n");
         }
-        structuredQuery.append("【患者主诉】\n").append(patientInfo);
+        if (!isBlank(input.patientInfo())) {
+            structuredQuery.append("【患者主诉】\n").append(input.patientInfo());
+        }
 
         if (!config.getVllm().isEnabled()) {
-            return mockResult(patientInfo);
+            return ToolResult.ok(mockResult());
         }
 
         try {
@@ -84,17 +87,21 @@ public class MedicalDiagnosisTool implements BiFunction<String, ToolContext, Str
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
                 JsonNode root = objectMapper.readTree(response.getBody());
                 String raw = root.path("choices").get(0).path("message").path("content").asText();
-                // 去掉 CoT <think> 标签（部分模型输出格式）
-                return raw.replaceAll("(?s)<think>.*?</think>\\s*", "").trim();
+                String result = raw.replaceAll("(?s)<think>.*?</think>\\s*", "").trim();
+                return ToolResult.ok(result);
             }
-            return "vLLM service returned unexpected response: " + response.getStatusCode();
+            return ToolResult.error("vLLM service returned unexpected response: " + response.getStatusCode());
         } catch (Exception e) {
             log.warn("vLLM service unavailable, returning mock result: {}", e.getMessage());
-            return mockResult(patientInfo);
+            return ToolResult.ok(mockResult());
         }
     }
 
-    private String mockResult(String patientInfo) {
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
+    }
+
+    private String mockResult() {
         return "Based on the provided patient information, here is a preliminary assessment:\n\n" +
                 "1. Symptoms noted from input\n" +
                 "2. Recommended further examinations: blood test, chest X-ray\n" +

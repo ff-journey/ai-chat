@@ -1,6 +1,6 @@
 package ff.pro.aichatali.tool.rag_agent_tool;
 
-import ff.pro.aichatali.service.MemoryHybridRetrieverService;
+import ff.pro.aichatali.service.MilvusHybridRetrieverService;
 import ff.pro.aichatali.service.websearch.WebSearchTool;
 import ff.pro.aichatali.tool.PluggableTool;
 import org.springframework.ai.chat.model.ChatModel;
@@ -21,7 +21,7 @@ public class RagAgentPluggableTool implements PluggableTool {
     private ChatModel chatModel;
 
     @Autowired
-    private MemoryHybridRetrieverService retrieverService;
+    private MilvusHybridRetrieverService retrieverService;
 
     @Autowired
     private WebSearchTool webSearchTool;

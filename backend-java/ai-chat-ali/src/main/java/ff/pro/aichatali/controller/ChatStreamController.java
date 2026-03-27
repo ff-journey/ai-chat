@@ -75,10 +75,6 @@ public class ChatStreamController {
     private ChatModel chatModel;
 
     @Autowired
-    TokenTextSplitter tokenTextSplitter;
-    @Autowired
-    VectorStore vectorStore;
-    @Autowired
     BM25Service bm25Service;
     @Autowired
     RRFMerger rrfMerger;

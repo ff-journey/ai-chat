@@ -7,8 +7,9 @@ import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Component;
 
+import ff.pro.aichatali.common.ToolResult;
+
 import java.util.List;
-import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
@@ -26,7 +27,7 @@ import java.util.stream.Collectors;
 @Component
 @RequiredArgsConstructor
 @Slf4j
-public class WebSearchTool implements BiFunction<WebSearchTool.Input, ToolContext, Map<String, String>> {
+public class WebSearchTool implements BiFunction<WebSearchTool.Input, ToolContext, ToolResult> {
 
     public record Input(String query) {}
 
@@ -35,11 +36,11 @@ public class WebSearchTool implements BiFunction<WebSearchTool.Input, ToolContex
     final WebSearchPort webSearchPort;
 
     @Override
-    public Map<String, String> apply(Input input, ToolContext toolContext) {
+    public ToolResult apply(Input input, ToolContext toolContext) {
         try {
             List<Document> results = webSearchPort.search(input.query(), DEFAULT_TOP_K);
             if (results.isEmpty()) {
-                return Map.of("result", "联网搜索未找到相关内容");
+                return ToolResult.ok("联网搜索未找到相关内容");
             }
             String content = results.stream()
                     .map(d -> {
@@ -48,10 +49,10 @@ public class WebSearchTool implements BiFunction<WebSearchTool.Input, ToolContex
                         return StringUtils.isNotBlank(url) ? text + "\n来源: " + url : text;
                     })
                     .collect(Collectors.joining("\n\n---\n\n"));
-            return Map.of("result", content);
+            return ToolResult.ok(content);
         } catch (Exception e) {
             log.error("WebSearchTool error: {}", e.getMessage(), e);
-            return Map.of("error", "联网搜索失败: " + e.getMessage());
+            return ToolResult.error("联网搜索失败: " + e.getMessage());
         }
     }
 }

@@ -24,19 +24,21 @@ public class MedicalDiagnosisPluggableTool implements PluggableTool {
     private RestTemplate medicalRestTemplate;
 
     @Override
-    public String name() { return "medical_diagnosis"; }
+    public String name() { return "medicalDiagnosis"; }
 
     @Override
     public String description() {
-        return "专业医疗诊断：根据患者症状和影像检查结果，进行系统性推理并给出诊断建议（不替代专业医生）";
+        return "专业医疗诊断推理：根据患者主诉和已有检查材料进行系统性推理，给出鉴别诊断和处理建议（不替代专业医生）。" +
+                "patientInfo: 患者主诉和症状描述；" +
+                "clinicalMaterials: 已完成的检查结果，如影像分类结论（可先调用 pneumoniaCnnTool 获取），可为空。";
     }
 
     @Override
     public ToolCallback toolCallback() {
-        return FunctionToolCallback.builder("medical_diagnosis",
+        return FunctionToolCallback.builder("medicalDiagnosis",
                 new MedicalDiagnosisTool(medicalToolConfig, medicalRestTemplate))
                 .description(description())
-                .inputType(String.class)
+                .inputType(MedicalDiagnosisTool.Input.class)
                 .build();
     }
 }

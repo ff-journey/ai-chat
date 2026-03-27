@@ -6,7 +6,6 @@ import ff.pro.aichatali.common.ThreadPoolHelper;
 import ff.pro.aichatali.controller.dto.L3ChunkDto;
 import ff.pro.aichatali.repo.RagChunkMapper;
 import ff.pro.aichatali.repo.RagChunkPo;
-import ff.pro.aichatali.service.rag.BM25Service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
@@ -48,7 +47,6 @@ public class DocumentService {
 
     final HierarchicalDocSplitter hierarchicalDocSplitter;
     final RagChunkMapper ragChunkMapper;
-    final BM25Service bm25Service;
     final EmbeddingService embeddingService;
 
     public record ProcessResult(String filename, int chunks, String url) {}
@@ -61,12 +59,12 @@ public class DocumentService {
      * @return processing stats
      */
     public ProcessResult processDocument(MultipartFile file) {
-        String savedPath = saveFile(file);
         String originalFilename = file.getOriginalFilename();
+        List<Document> pages = parsePdfByPage(file);
+
+        String savedPath = saveFile(file);
         String storedFilename = Paths.get(savedPath).getFileName().toString();
         String fileUrl = "/uploads/" + RAG_REPO + "/" + storedFilename;
-
-        List<Document> pages = parsePdfByPage(file);
         List<Document> cleanPages = removeReferencesPages(pages);
 
         List<L3ChunkDto> l3chunks = cleanPages.parallelStream()
@@ -87,7 +85,6 @@ public class DocumentService {
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
         ragChunkMapper.batchInsert(l3chunks.stream().map(L3ChunkDto::getRagChunk).toList());
-        bm25Service.addDocuments(l3chunks.stream().map(L3ChunkDto::getDocument).toList());
 
         log.info("Indexed document '{}': {} L3 chunks", originalFilename, l3chunks.size());
         return new ProcessResult(originalFilename, l3chunks.size(), fileUrl);

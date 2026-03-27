@@ -1,6 +1,6 @@
 package ff.pro.aichatali.tool.rag_tool;
 
-import ff.pro.aichatali.service.MemoryHybridRetrieverService;
+import ff.pro.aichatali.service.MilvusHybridRetrieverService;
 import ff.pro.aichatali.tool.PluggableTool;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.function.FunctionToolCallback;
@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 public class RagPluggableTool implements PluggableTool {
 
     @Autowired
-    private MemoryHybridRetrieverService memoryHybridRetrieverService;
+    private MilvusHybridRetrieverService milvusHybridRetrieverService;
 
     @Override
     public String name() { return "ragTool"; }
@@ -25,9 +25,9 @@ public class RagPluggableTool implements PluggableTool {
 
     @Override
     public ToolCallback toolCallback() {
-        return FunctionToolCallback.builder("ragTool", memoryHybridRetrieverService)
+        return FunctionToolCallback.builder("ragTool", milvusHybridRetrieverService)
                 .description(description())
-                .inputType(MemoryHybridRetrieverService.Input.class)
+                .inputType(MilvusHybridRetrieverService.Input.class)
                 .build();
     }
 }

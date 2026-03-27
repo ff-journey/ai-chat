@@ -379,7 +379,7 @@ createApp({
                 ragTool:               '知识库',
                 web_search:            '联网搜索',
                 feiyanAgentMedicalTool:'肺炎分析',
-                medical_diagnosis:     '医疗问诊'
+                medicalDiagnosis:     '医疗问诊'
             };
             return map[name] || name;
         },
@@ -389,7 +389,7 @@ createApp({
                 ragTool:               'fa-book',
                 web_search:            'fa-globe',
                 feiyanAgentMedicalTool:'fa-lungs',
-                medical_diagnosis:     'fa-stethoscope'
+                medicalDiagnosis:     'fa-stethoscope'
             };
             return 'fas ' + (icons[name] || 'fa-cog');
         },

@@ -17,10 +17,11 @@ spring:
         client:
           host: 127.0.0.1
           port: 19530
-#        collection-name: rag_java_demo
-#        embedding-dimension: 1024
-#        metric-type: COSINE
-#        initialize-schema: true
+          connect-timeout-ms: 10000
+          keep-alive-time-ms: 55000
+          keep-alive-timeout-ms: 20000
+          idle-timeout-ms: 86400000
+          secure: false
     openai:
       api-key: EMPTY
       base-url: http://localhost:9901

@@ -11,7 +11,7 @@ import org.springframework.web.client.RestTemplate;
 
 /**
  * 胸部 X 光 CNN 快速分类工具（仅分类，不做诊断解释）。
- * 需要完整诊断报告时请使用 medical_diagnosis 工具。
+ * 需要完整诊断报告时请使用 medicalDiagnosis 工具。
  */
 @Component
 @ConditionalOnProperty(name = "tools.pneumonia.enabled", havingValue = "true", matchIfMissing = true)
@@ -36,7 +36,7 @@ public class FeiyanPluggableTool implements PluggableTool {
         return FunctionToolCallback.builder("pneumoniaCnnTool",
                 new FeiyanCnnTool(medicalToolConfig, medicalRestTemplate))
                 .description(description())
-                .inputType(String.class)
+                .inputType(FeiyanCnnTool.Input.class)
                 .build();
     }
 }
