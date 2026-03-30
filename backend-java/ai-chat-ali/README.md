@@ -86,14 +86,14 @@ backend-java/
 
 ## Agent 路由
 
-supervisor_agent 根据用户输入自动路由：
+supervisorAgent 根据用户输入自动路由：
 
 | 场景 | 路由目标 |
 |------|----------|
 | 上传胸部 X 光图片 / 肺炎检测 | pneumonia_recognition |
-| 医疗健康咨询 | medicalDiagnosis |
-| 天气 / 位置查询 | weather_agent |
-| 其他对话 | chat_agent |
+| 医疗健康咨询 | medicalDiagnosisTool |
+| 天气 / 位置查询 | weatherAgent |
+| 其他对话 | chatAgent |
 
 ## 医疗服务配置
 

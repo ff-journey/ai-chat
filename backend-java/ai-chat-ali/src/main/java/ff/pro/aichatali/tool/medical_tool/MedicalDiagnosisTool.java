@@ -7,6 +7,7 @@ import ff.pro.aichatali.config.MedicalToolConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
+import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.http.*;
 
@@ -24,8 +25,8 @@ import java.util.function.BiFunction;
 public class MedicalDiagnosisTool implements BiFunction<MedicalDiagnosisTool.Input, ToolContext, ToolResult> {
 
     public record Input(
-            String patientInfo,
-            String clinicalMaterials
+            @ToolParam(description = "患者主诉和症状描述") String patientInfo,
+            @ToolParam(description = "已完成的检查结果，如影像分类结论，可为空。") String clinicalMaterials
     ) {}
 
     private static final Logger log = LoggerFactory.getLogger(MedicalDiagnosisTool.class);

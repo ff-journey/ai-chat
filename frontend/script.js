@@ -10,6 +10,13 @@ createApp({
             abortController: null,
             isComposing: false,
 
+            // ─── auth ──────────────────────────────────────────────
+            token: null,
+            loggedIn: false,
+            username: '',
+            loginForm: { username: '', password: '' },
+            registerMode: false,
+
             // ─── user / session ────────────────────────────────────
             userId: '',
             sessionId: 'session_' + Date.now(),
@@ -34,6 +41,11 @@ createApp({
             enabledTools: [],     // names of enabled tools
             showToolPicker: false,
 
+            // ─── observability SSE ─────────────────────────────────
+            obsSource: null,
+            pendingBotIdx: -1,
+            userScrolledUp: false,
+
             // ─── documents ─────────────────────────────────────────
             documents: [],
             documentsLoading: false,
@@ -45,10 +57,10 @@ createApp({
 
     computed: {
         displayedTools() {
-            return this.availableTools.slice(0, 4);
+            return this.availableTools.length > 5 ? this.availableTools.slice(0, 5) : this.availableTools;
         },
         extraTools() {
-            return this.availableTools.slice(4);
+            return this.availableTools.length > 5 ? this.availableTools.slice(5) : [];
         },
         chatImagePreviewUrl() {
             if (this.selectedSample) {
@@ -58,17 +70,121 @@ createApp({
         },
         hasAttachment() {
             return !!(this.selectedChatImage || this.selectedSample);
+        },
+        toolFlagValue() {
+            return this.enabledTools.reduce((acc, name) => {
+                const t = this.availableTools.find(t => t.name === name);
+                return t ? acc | t.toolFlag : acc;
+            }, 0);
         }
     },
 
     async mounted() {
         this.configureMarked();
-        this.userId = localStorage.getItem('userId') || ('user_' + Math.random().toString(36).slice(2, 11));
-        localStorage.setItem('userId', this.userId);
-        await this.loadTools();
+        const storedToken    = localStorage.getItem('token');
+        const storedUserId   = localStorage.getItem('userId');
+        const storedUsername = localStorage.getItem('username');
+        if (storedToken && storedUserId) {
+            this.token    = storedToken;
+            this.userId   = storedUserId;
+            this.username = storedUsername || '';
+            this.loggedIn = true;
+            await this.loadTools();
+        }
     },
 
     methods: {
+        // ─── Auth ──────────────────────────────────────────────────
+        async login() {
+            if (!this.loginForm.username || !this.loginForm.password) return;
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: this.loginForm.username, password: this.loginForm.password })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    this.token    = data.token;
+                    this.userId   = String(data.userId);
+                    this.username = data.username;
+                    localStorage.setItem('token',    data.token);
+                    localStorage.setItem('userId',   String(data.userId));
+                    localStorage.setItem('username', data.username);
+                    this.loggedIn = true;
+                    this.loginForm = { username: '', password: '' };
+                    await this.loadTools();
+                } else {
+                    alert('登录失败: ' + data.message);
+                }
+            } catch (e) {
+                console.error(e);
+                alert('登录请求失败: ' + e.message);
+            }
+        },
+
+        async register() {
+            if (!this.loginForm.username || !this.loginForm.password) return;
+            try {
+                const res = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: this.loginForm.username, password: this.loginForm.password })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    this.token    = data.token;
+                    this.userId   = String(data.userId);
+                    this.username = data.username;
+                    localStorage.setItem('token',    data.token);
+                    localStorage.setItem('userId',   String(data.userId));
+                    localStorage.setItem('username', data.username);
+                    this.loggedIn    = true;
+                    this.registerMode = false;
+                    this.loginForm   = { username: '', password: '' };
+                    await this.loadTools();
+                } else {
+                    alert('注册失败: ' + data.message);
+                }
+            } catch (e) {
+                console.error(e);
+                alert('注册请求失败: ' + e.message);
+            }
+        },
+
+        logout() {
+            this.obsSource?.close();
+            this.messages.forEach(m => this.stopAllTimers(m.progressSteps));
+            this.pendingBotIdx = -1;
+            this.token     = null;
+            this.loggedIn  = false;
+            this.userId    = '';
+            this.username  = '';
+            this.messages  = [];
+            this.sessions  = [];
+            this.availableTools = [];
+            this.enabledTools   = [];
+            localStorage.removeItem('token');
+            localStorage.removeItem('userId');
+            localStorage.removeItem('username');
+        },
+
+        handleUnauthorized() {
+            this.logout();
+        },
+
+        async authFetch(url, options = {}) {
+            const { headers: extraHeaders, ...rest } = options;
+            const res = await fetch(url, { headers: { 'X-Token': this.token, ...extraHeaders }, ...rest });
+            if (res.status === 401) {
+                this.handleUnauthorized();
+                const err = new Error('Unauthorized');
+                err.isUnauthorized = true;
+                throw err;
+            }
+            return res;
+        },
+
         // ─── Markdown ──────────────────────────────────────────────
         configureMarked() {
             marked.setOptions({
@@ -106,9 +222,17 @@ createApp({
         resetTextareaHeight() {
             if (this.$refs.textarea) this.$refs.textarea.style.height = 'auto';
         },
-        scrollToBottom() {
-            if (this.$refs.chatContainer)
-                this.$refs.chatContainer.scrollTop = this.$refs.chatContainer.scrollHeight;
+        scrollToBottom(force) {
+            if (!this.$refs.chatContainer) return;
+            if (!force && this.userScrolledUp) return;
+            this.$refs.chatContainer.scrollTop = this.$refs.chatContainer.scrollHeight;
+        },
+        handleChatScroll() {
+            const el = this.$refs.chatContainer;
+            if (!el) return;
+            // User is "at bottom" if within 80px of the bottom
+            const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+            this.userScrolledUp = !atBottom;
         },
 
         // ─── Send / Stop ────────────────────────────────────────────
@@ -138,18 +262,22 @@ createApp({
             // Clear inputs
             this.userInput = '';
             this.clearChatImage();
-            this.$nextTick(() => { this.resetTextareaHeight(); this.scrollToBottom(); });
+            this.userScrolledUp = false;
+            this.$nextTick(() => { this.resetTextareaHeight(); this.scrollToBottom(true); });
 
             // Add thinking bubble
-            const botMsg = { isUser: false, text: '', isThinking: true, toolEvents: [], ragTrace: null, ragSteps: [] };
+            const botMsg = { isUser: false, text: '', isThinking: true, toolEvents: [], ragTrace: null, ragSteps: [], progressSteps: [] };
             this.messages.push(botMsg);
             const botIdx = this.messages.length - 1;
+            this.pendingBotIdx = botIdx;
+            this.connectObservability();
 
             this.isLoading = true;
             this.abortController = new AbortController();
 
             try {
                 let response;
+                const toolHeaders = { 'X-Tool-Flag': String(this.toolFlagValue) };
                 if (sentSample) {
                     // Sample image via query string
                     const params = new URLSearchParams({
@@ -158,8 +286,9 @@ createApp({
                         userId:    this.userId,
                         sessionId: this.sessionId
                     });
-                    response = await fetch(`/chat/stream/sample?${params}`, {
+                    response = await this.authFetch(`/chat/stream/sample?${params}`, {
                         method: 'POST',
+                        headers: toolHeaders,
                         signal: this.abortController.signal
                     });
                 } else if (sentImage) {
@@ -169,16 +298,17 @@ createApp({
                     fd.append('message',   sentText);
                     fd.append('userId',    this.userId);
                     fd.append('sessionId', this.sessionId);
-                    response = await fetch('/chat/stream/image', {
+                    response = await this.authFetch('/chat/stream/image', {
                         method: 'POST',
+                        headers: toolHeaders,
                         body: fd,
                         signal: this.abortController.signal
                     });
                 } else {
                     // Text-only via JSON body
-                    response = await fetch('/chat/stream', {
+                    response = await this.authFetch('/chat/stream', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'application/json', ...toolHeaders },
                         body: JSON.stringify({
                             message:   sentText,
                             userId:    this.userId,
@@ -205,6 +335,8 @@ createApp({
                     this.messages[botIdx].isThinking = false;
                     if (!this.messages[botIdx].text) this.messages[botIdx].text = '(已终止)';
                     else this.messages[botIdx].text += '\n\n_(已终止)_';
+                } else if (err.isUnauthorized) {
+                    this.messages.splice(botIdx, 1);
                 } else {
                     console.error(err);
                     this.messages[botIdx].isThinking = false;
@@ -213,7 +345,12 @@ createApp({
             } finally {
                 this.isLoading = false;
                 this.abortController = null;
-                this.$nextTick(() => this.scrollToBottom());
+                if (this.pendingBotIdx >= 0 && this.messages[this.pendingBotIdx]) {
+                    this.stopAllTimers(this.messages[this.pendingBotIdx].progressSteps);
+                }
+                this.pendingBotIdx = -1;
+                this.userScrolledUp = false;
+                this.$nextTick(() => this.scrollToBottom(true));
             }
         },
 
@@ -239,12 +376,6 @@ createApp({
                         if (ev.type === 'token') {
                             this.messages[botIdx].isThinking = false;
                             this.messages[botIdx].text += ev.text;
-                        } else if (ev.type === 'tool_done') {
-                            this.messages[botIdx].toolEvents.push({ done: true });
-                        } else if (ev.type === 'rag_step') {
-                            this.messages[botIdx].ragSteps.push(ev.step);
-                        } else if (ev.type === 'trace') {
-                            this.messages[botIdx].ragTrace = ev.rag_trace;
                         } else if (ev.type === 'error') {
                             this.messages[botIdx].isThinking = false;
                             this.messages[botIdx].text += `\n[Error: ${ev.message || ev.content}]`;
@@ -261,7 +392,7 @@ createApp({
         // ─── Session title ──────────────────────────────────────────
         async saveTitle(title) {
             try {
-                await fetch(`/sessions/${this.userId}/${this.sessionId}/title`, {
+                await this.authFetch(`/sessions/${this.userId}/${this.sessionId}/title`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ title })
@@ -273,6 +404,9 @@ createApp({
 
         // ─── Navigation ─────────────────────────────────────────────
         handleNewChat() {
+            this.obsSource?.close();
+            this.messages.forEach(m => this.stopAllTimers(m.progressSteps));
+            this.pendingBotIdx  = -1;
             this.messages       = [];
             this.sessionId      = 'session_' + Date.now();
             this.isFirstMessage = true;
@@ -292,7 +426,7 @@ createApp({
 
         async loadSessions() {
             try {
-                const res = await fetch(`/sessions/${this.userId}`);
+                const res = await this.authFetch(`/sessions/${this.userId}`);
                 if (!res.ok) throw new Error('Failed to load sessions');
                 const data = await res.json();
                 this.sessions = data.sessions || [];
@@ -307,20 +441,22 @@ createApp({
             this.isFirstMessage = false;
             this.showHistorySidebar = false;
             this.activeNav = 'newChat';
+            this.connectObservability();
 
             try {
-                const res = await fetch(`/sessions/${this.userId}/${sid}`);
+                const res = await this.authFetch(`/sessions/${this.userId}/${sid}`);
                 if (!res.ok) throw new Error('Failed to load session');
                 const data = await res.json();
                 this.messages = (data.messages || [])
                     .filter(m => m.messageType === 'user' || m.messageType === 'assistant')
                     .map(m => ({
-                        isUser:     m.messageType === 'user',
-                        text:       m.content || '',
-                        imageUrl:   m.imageUrl || null,
-                        toolEvents: [],
-                        ragTrace:   null,
-                        ragSteps:   []
+                        isUser:        m.messageType === 'user',
+                        text:          m.content || '',
+                        imageUrl:      m.imageUrl || null,
+                        toolEvents:    [],
+                        ragTrace:      null,
+                        ragSteps:      [],
+                        progressSteps: []
                     }));
             } catch (e) {
                 console.error(e);
@@ -333,7 +469,7 @@ createApp({
         async deleteSession(sid) {
             if (!confirm('确定删除这个会话吗？')) return;
             try {
-                await fetch(`/sessions/${this.userId}/${sid}`, { method: 'DELETE' });
+                await this.authFetch(`/sessions/${this.userId}/${sid}`, { method: 'DELETE' });
                 this.sessions = this.sessions.filter(s => s.sessionId !== sid);
                 if (this.sessionId === sid) {
                     this.messages       = [];
@@ -357,7 +493,7 @@ createApp({
         // ─── Tools ──────────────────────────────────────────────────
         async loadTools() {
             try {
-                const res = await fetch('/api/tools');
+                const res = await this.authFetch('/api/tools');
                 if (!res.ok) return;
                 this.availableTools = await res.json();
                 this.enabledTools   = [];
@@ -370,28 +506,155 @@ createApp({
             if (this.enabledTools.includes(name)) {
                 this.enabledTools = this.enabledTools.filter(n => n !== name);
             } else {
+                // Find mutual exclusions declared by this tool
+                const tool = this.availableTools.find(t => t.name === name);
+                const excludes = tool?.mutuallyExclusiveWith ?? [];
+                // Remove any currently-enabled tools that are mutually exclusive with the new one
+                this.enabledTools = this.enabledTools.filter(n => !excludes.includes(n));
                 this.enabledTools.push(name);
             }
         },
 
         toolDisplayName(name) {
-            const map = {
-                ragTool:               '知识库',
-                web_search:            '联网搜索',
-                feiyanAgentMedicalTool:'肺炎分析',
-                medicalDiagnosis:     '医疗问诊'
-            };
-            return map[name] || name;
+            const t = this.availableTools.find(t => t.name === name);
+            return t ? t.title : name;
         },
 
         toolIcon(name) {
-            const icons = {
-                ragTool:               'fa-book',
-                web_search:            'fa-globe',
-                feiyanAgentMedicalTool:'fa-lungs',
-                medicalDiagnosis:     'fa-stethoscope'
+            const t = this.availableTools.find(t => t.name === name);
+            return 'fas ' + (t ? t.toolIcon : 'fa-cog');
+        },
+
+        // ─── Observability SSE ────────────────────────────────────────
+        connectObservability() {
+            this.obsSource?.close();
+            this._obsRetryCount = 0;
+            const tid = (this.userId && this.userId !== 'default')
+                ? `${this.userId}_${this.sessionId}` : this.sessionId;
+            const connect = () => {
+                const es = new EventSource(`/sse/${tid}`);
+                es.onmessage = e => {
+                    this._obsRetryCount = 0;
+                    try { this.handleObsEvent(JSON.parse(e.data)); }
+                    catch (err) { console.warn('obs parse error', err); }
+                };
+                es.onerror = () => {
+                    es.close();
+                    if (this.pendingBotIdx >= 0 && this._obsRetryCount < 5) {
+                        this._obsRetryCount++;
+                        setTimeout(() => connect(), 1000 * this._obsRetryCount);
+                    }
+                };
+                this.obsSource = es;
             };
-            return 'fas ' + (icons[name] || 'fa-cog');
+            connect();
+        },
+
+        // ─── Timer management for progress steps ─────────────────────
+        startStepTimer(step) {
+            step.startTime = Date.now();
+            step.timerId = setInterval(() => {
+                step.elapsed = ((Date.now() - step.startTime) / 1000).toFixed(1);
+            }, 100);
+        },
+        stopStepTimer(step) {
+            if (step.timerId) {
+                clearInterval(step.timerId);
+                step.timerId = null;
+            }
+            if (step.startTime) {
+                step.elapsed = ((Date.now() - step.startTime) / 1000).toFixed(1);
+            }
+        },
+        stopAllTimers(steps) {
+            if (!steps) return;
+            for (const step of steps) {
+                this.stopStepTimer(step);
+                if (step.subSteps) this.stopAllTimers(step.subSteps);
+            }
+        },
+
+        handleObsEvent(ev) {
+            if (this.pendingBotIdx < 0) return;
+            const msg = this.messages[this.pendingBotIdx];
+            if (!msg) return;
+
+            // Skip top-level supervisorAgent thinking/step_end — only show tool calls
+            const isSupervisorMeta = !ev.parentNode &&
+                (ev.type === 'AGENT_THINKING' || ev.type === 'AGENT_STEP_END');
+            if (isSupervisorMeta) return;
+
+            if (ev.type === 'AGENT_THINKING') {
+                const parent = [...msg.progressSteps].reverse()
+                    .find(s => s.name === ev.parentNode && s.type === 'tool');
+                if (parent) {
+                    const sub = {
+                        type: 'thinking', name: ev.agentName || 'Agent',
+                        displayName: ev.agentName || 'Agent',
+                        icon: 'fa-brain',
+                        inputPreview: ev.input || '', outputPreview: '',
+                        done: false, error: false, expanded: false,
+                        parentNode: ev.parentNode, subSteps: [],
+                        startTime: null, elapsed: '0.0', timerId: null
+                    };
+                    parent.subSteps.push(sub);
+                    this.startStepTimer(sub);
+                }
+            } else if (ev.type === 'TOOL_START') {
+                const toolInfo = this.availableTools.find(t => t.name === ev.toolName);
+                const step = {
+                    type: 'tool', name: ev.toolName || '工具',
+                    displayName: toolInfo ? toolInfo.title : (ev.toolName || '工具'),
+                    icon: toolInfo ? toolInfo.toolIcon : 'fa-wrench',
+                    inputPreview: ev.input || '', outputPreview: '',
+                    done: false, error: false, expanded: false,
+                    parentNode: ev.parentNode || null, subSteps: [],
+                    startTime: null, elapsed: '0.0', timerId: null
+                };
+                if (!ev.parentNode) {
+                    msg.progressSteps.push(step);
+                } else {
+                    const parent = [...msg.progressSteps].reverse()
+                        .find(s => s.name === ev.parentNode && s.type === 'tool');
+                    if (parent) parent.subSteps.push(step);
+                }
+                this.startStepTimer(step);
+            } else if (ev.type === 'AGENT_STEP_END') {
+                const parent = [...msg.progressSteps].reverse()
+                    .find(s => s.name === ev.parentNode && s.type === 'tool');
+                if (parent) {
+                    const sub = [...parent.subSteps].reverse()
+                        .find(s => s.type === 'thinking' && !s.done);
+                    if (sub) {
+                        sub.done = true;
+                        sub.outputPreview = ev.output || '';
+                        this.stopStepTimer(sub);
+                    }
+                }
+            } else if (ev.type === 'TOOL_END') {
+                const markDone = (step) => {
+                    step.done = true;
+                    step.outputPreview = ev.output || '';
+                    if (ev.error) step.error = true;
+                    this.stopStepTimer(step);
+                };
+                if (!ev.parentNode) {
+                    const step = [...msg.progressSteps].reverse()
+                        .find(s => s.type === 'tool' && s.name === ev.toolName && !s.done);
+                    if (step) markDone(step);
+                } else {
+                    const parent = [...msg.progressSteps].reverse()
+                        .find(s => s.name === ev.parentNode && s.type === 'tool');
+                    if (parent) {
+                        const sub = [...parent.subSteps].reverse()
+                            .find(s => s.type === 'tool' && s.name === ev.toolName && !s.done);
+                        if (sub) markDone(sub);
+                    }
+                }
+            } else if (ev.type === 'DONE') {
+                this.stopAllTimers(msg.progressSteps);
+                this.pendingBotIdx = -1;
+            }
         },
 
         // ─── Chat image attachment ────────────────────────────────────
@@ -425,7 +688,7 @@ createApp({
 
         async loadSamples() {
             try {
-                const res = await fetch('/api/samples');
+                const res = await this.authFetch('/api/samples');
                 if (!res.ok) return;
                 this.sampleCategories = await res.json();
             } catch (e) {
@@ -444,7 +707,7 @@ createApp({
         async loadDocuments() {
             this.documentsLoading = true;
             try {
-                const res = await fetch('/documents');
+                const res = await this.authFetch('/documents');
                 if (!res.ok) throw new Error('Failed to load documents');
                 const data = await res.json();
                 this.documents = data.documents || [];
@@ -477,7 +740,7 @@ createApp({
             try {
                 const fd = new FormData();
                 fd.append('file', this.selectedFile);
-                const res = await fetch('/documents/upload', { method: 'POST', body: fd });
+                const res = await this.authFetch('/documents/upload', { method: 'POST', body: fd });
                 if (!res.ok) {
                     const err = await res.json().catch(() => ({}));
                     throw new Error(err.error || 'Upload failed');
@@ -499,7 +762,7 @@ createApp({
         async deleteDocument(filename) {
             if (!confirm('确定删除该文档及其所有向量数据吗？')) return;
             try {
-                const res = await fetch(`/documents/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+                const res = await this.authFetch(`/documents/${encodeURIComponent(filename)}`, { method: 'DELETE' });
                 if (!res.ok && res.status !== 404) throw new Error('Delete failed');
                 await this.loadDocuments();
             } catch (e) {
@@ -518,6 +781,12 @@ createApp({
         getFileIcon(type) {
             const icons = { PDF: 'fas fa-file-pdf', DOC: 'fas fa-file-word', DOCX: 'fas fa-file-word' };
             return icons[(type || '').toUpperCase()] || 'fas fa-file';
+        },
+
+        formatToolInput(input) {
+            if (!input) return '';
+            try { return JSON.stringify(JSON.parse(input), null, 2); }
+            catch { return input; }
         },
 
         formatSessionTime(ts) {

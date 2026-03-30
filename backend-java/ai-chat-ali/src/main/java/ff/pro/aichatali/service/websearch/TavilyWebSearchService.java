@@ -20,10 +20,12 @@ import java.util.UUID;
 @Slf4j
 public class TavilyWebSearchService implements WebSearchPort {
 
-    private static final String TAVILY_API_URL = "https://api.tavily.com/search";
 
-    @Value("${tavily.api-key}")
+    @Value("${web-search.api-key}")
     private String apiKey;
+    @Value("${web-search.base-url}")
+    private String tavilyApiUrl;
+    
 
     private final RestClient restClient = RestClient.create();
 
@@ -39,7 +41,7 @@ public class TavilyWebSearchService implements WebSearchPort {
             );
 
             TavilyResponse response = restClient.post()
-                    .uri(TAVILY_API_URL)
+                    .uri(tavilyApiUrl)
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Content-Type", "application/json")
                     .body(body)

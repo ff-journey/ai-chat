@@ -2,6 +2,7 @@ package ff.pro.aichatali.tool.feiyan_tool;
 
 import ff.pro.aichatali.config.MedicalToolConfig;
 import ff.pro.aichatali.tool.PluggableTool;
+import lombok.Getter;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.function.FunctionToolCallback;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,9 +12,10 @@ import org.springframework.web.client.RestTemplate;
 
 /**
  * 胸部 X 光 CNN 快速分类工具（仅分类，不做诊断解释）。
- * 需要完整诊断报告时请使用 medicalDiagnosis 工具。
+ * 需要完整诊断报告时请使用 medicalDiagnosisTool 工具。
  */
 @Component
+@Getter
 @ConditionalOnProperty(name = "tools.pneumonia.enabled", havingValue = "true", matchIfMissing = true)
 public class FeiyanPluggableTool implements PluggableTool {
 
@@ -23,19 +25,20 @@ public class FeiyanPluggableTool implements PluggableTool {
     @Autowired
     private RestTemplate medicalRestTemplate;
 
-    @Override
-    public String name() { return "pneumoniaCnnTool"; }
+    private final String name = "pneumoniaCnnTool";
+
+    private final String title = "肺炎分析";
+
+    private final String description = "胸部X光影像肺炎快速分类，返回是否肺炎及置信度。仅做影像分类，不提供诊断建议。";
+
+    private final String toolIcon = "fa-lungs";
+
 
     @Override
-    public String description() {
-        return "胸部X光影像肺炎快速分类，返回是否肺炎及置信度。仅做影像分类，不提供诊断建议。";
-    }
-
-    @Override
-    public ToolCallback toolCallback() {
-        return FunctionToolCallback.builder("pneumoniaCnnTool",
+    public ToolCallback getToolCallback() {
+        return FunctionToolCallback.builder(this.getName(),
                 new FeiyanCnnTool(medicalToolConfig, medicalRestTemplate))
-                .description(description())
+                .description(getDescription())
                 .inputType(FeiyanCnnTool.Input.class)
                 .build();
     }

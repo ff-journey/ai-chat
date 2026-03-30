@@ -1,29 +1,24 @@
 # ECS First-Time Setup
 
-## 1. Install Java 21
+## 1. Install SDKMAN + JDK (via setup.sh)
+
+Run the project's setup script — it installs SDKMAN and the JDK version declared in `.sdkmanrc` automatically:
 
 ```bash
-# Alibaba Dragonwell (recommended for ECS)
-sudo apt-get update
-sudo apt-get install -y wget
-wget https://dragonwell.oss-cn-hangzhou.aliyuncs.com/21/GA/Dragonwell_21_aarch64.tar.gz
-# or use apt repo:
-sudo apt-get install -y dragonwell-21-jdk
+bash ~/ai-chat/deploy/ecs/setup.sh
+```
 
-# Verify
+The script is idempotent: re-running it skips already-installed components. After it completes, `java-app.sh` will use SDKMAN to switch to the correct JDK on every start.
+
+To verify:
+```bash
+source ~/.sdkman/bin/sdkman-init.sh
 java -version
 ```
 
 ## 2. Install frps
 
-```bash
-# Download frp release (match version with home frpc)
-FRP_VER=0.61.0
-wget https://github.com/fatedier/frp/releases/download/v${FRP_VER}/frp_${FRP_VER}_linux_amd64.tar.gz
-tar -xzf frp_${FRP_VER}_linux_amd64.tar.gz
-sudo cp frp_${FRP_VER}_linux_amd64/frps /usr/local/bin/frps
-sudo chmod +x /usr/local/bin/frps
-```
+See `frp-setup-ecs.md` for detailed frps installation, configuration, and security group setup.
 
 ## 3. Clone Repository
 
@@ -85,21 +80,4 @@ curl http://<ECS_PUBLIC_IP>:8080/
 
 ## Home Machine (Windows) Setup
 
-### Install frpc
-
-1. Download frp release matching ECS frps version
-2. Extract `frpc.exe` to a convenient location (e.g. `C:\frp\frpc.exe`)
-3. Edit `deploy\home\config\frpc.toml`:
-   - Set `serverAddr` to ECS public IP
-   - Set `auth.token` to match frps.toml
-
-### Start frpc and CNN
-
-```powershell
-.\deploy\home\frpc.ps1 start
-.\deploy\home\cnn.ps1 start
-```
-
-### Verify tunnel
-
-On ECS: `ss -tlnp | grep 9801` should show port listening after frpc connects.
+See `frp-setup-home.md` for frpc installation and configuration.

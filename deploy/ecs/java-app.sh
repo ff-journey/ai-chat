@@ -5,6 +5,20 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Initialize SDKMAN and switch to the Java version declared in .sdkmanrc
+export SDKMAN_DIR="${SDKMAN_DIR:-$HOME/.sdkman}"
+if [[ -s "$SDKMAN_DIR/bin/sdkman-init.sh" ]]; then
+  source "$SDKMAN_DIR/bin/sdkman-init.sh"
+  PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+  if [ -f "$PROJECT_ROOT/.sdkmanrc" ]; then
+    JAVA_VER=$(grep '^java=' "$PROJECT_ROOT/.sdkmanrc" | cut -d= -f2)
+    if [ -n "$JAVA_VER" ]; then
+      sdk use java "$JAVA_VER" >/dev/null 2>&1 \
+        || echo "Warning: 'sdk use java $JAVA_VER' failed, falling back to system java"
+    fi
+  fi
+fi
+
 JAR_FILE="../../backend-java/ai-chat-ali/build/libs/ai-chat-ali.jar"
 ENV_FILE="config/.env"
 LOG_FILE="java-app.log"

@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'idea'
     id 'application'
     id 'org.springframework.boot' version '3.5.11'
     id 'io.spring.dependency-management' version '1.1.7'
@@ -42,7 +43,6 @@ dependencies {
     implementation platform('com.alibaba.cloud.ai:spring-ai-alibaba-extensions-bom:1.1.2.1')
 
     implementation 'com.alibaba.cloud.ai:spring-ai-alibaba-agent-framework'
-    implementation 'com.alibaba.cloud.ai:spring-ai-alibaba-starter-dashscope'
 
     // Source: https://mvnrepository.com/artifact/io.zipkin.reporter2/zipkin-reporter-brave
 //    implementation("io.zipkin.reporter2:zipkin-reporter-brave:3.5.1")
@@ -56,6 +56,12 @@ dependencies {
 tasks.named('test') {
     useJUnitPlatform()
 }
+idea {
+    module {
+        resourceDirs.add(file('config'))
+    }
+}
+sourceSets.main.runtimeClasspath += files('config')
 
 // ============================================================
 // 前端静态资源：直接从 frontend/ 目录复制到 Spring Boot classpath:/static/
@@ -146,7 +152,7 @@ task dist {
         println " dist 打包完成: ${distOutputDir.absolutePath}"
         println "   lib/ai-chat-boot.jar"
         println "   bin/ai-chat.sh"
-        println "   config/          ← 外部配置，可覆盖 JAR 内 application.yml"
+        println "   config/          ← 外部配置，可覆盖 JAR 内变量"
         println "   samples/         ← sample 图片"
         println "=========================================="
     }

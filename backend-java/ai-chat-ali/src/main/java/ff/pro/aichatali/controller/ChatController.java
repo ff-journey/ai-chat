@@ -6,6 +6,10 @@ import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
 import com.alibaba.cloud.ai.graph.streaming.OutputType;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import ff.pro.aichatali.common.RequestContext;
+import ff.pro.aichatali.common.SysContext;
+import ff.pro.aichatali.config.AgentEvent;
+import ff.pro.aichatali.config.SseService;
 import ff.pro.aichatali.service.ChatHistoryService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,8 +19,10 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Sinks;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -35,7 +41,7 @@ import java.util.UUID;
 public class ChatController {
 
     @Autowired
-    @Qualifier("supervisor_agent")
+    @Qualifier("supervisorAgent")
     private ReactAgent supervisorAgent;
 
     @Autowired
@@ -44,6 +50,9 @@ public class ChatController {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private SseService sseService;
+
     @Value("${app.upload.dir:uploads}")
     private String uploadDir;
 
@@ -51,6 +60,7 @@ public class ChatController {
     private String samplesDir;
 
     record ChatRequest(String message, String userId, String sessionId) {}
+
 
     /** Text-only chat via JSON body. */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -106,41 +116,63 @@ public class ChatController {
 
     // ── private helpers ────────────────────────────────────────────────────────
 
-    private Flux<String> doStream(String threadId, String message, String imagePath, String titleHint) {
+    private Flux<String> doStream(String threadId, String message, String imagePath,
+                                  String titleHint) {
         RunnableConfig.Builder cfgBuilder = RunnableConfig.builder().threadId(threadId);
         if (imagePath != null) cfgBuilder.addMetadata("uploaded_image_path", imagePath);
+        cfgBuilder.addMetadata(SysContext.TOOL_FLAG, RequestContext.getRequestContext().getToolFlag());
+        cfgBuilder.addMetadata(SysContext.THREAD_ID, threadId);
         RunnableConfig config = cfgBuilder.build();
 
         StringBuilder aiResponse = new StringBuilder();
         try {
-            return supervisorAgent.stream(message, config)
+            Sinks.Empty<Void> doneSink = Sinks.empty();
+
+            Flux<String> tokens = supervisorAgent.stream(message, config)
                     .filter(o -> o instanceof StreamingOutput)
-                    .map(o -> {
-                        StreamingOutput so = (StreamingOutput) o;
+                    .flatMap(o -> {
+                        StreamingOutput<?> so = (StreamingOutput<?>) o;
                         try {
+                            String text = so.message() != null ? so.message().getText() : null;
+                            log.debug("StreamingOutput type={}, text='{}'",
+                                      so.getOutputType(),
+                                      text != null ? text.substring(0, Math.min(text.length(), 80)) : "null");
                             if (so.getOutputType() == OutputType.AGENT_MODEL_STREAMING) {
-                                String text = so.message().getText();
                                 if (text != null && !text.isEmpty()) {
                                     aiResponse.append(text);
-                                    return jsonEvent("token", Map.<String, Object>of("text", text));
+                                    return Flux.just(jsonEvent("token", Map.<String, Object>of("text", text)));
                                 }
-                            } else if (so.getOutputType() == OutputType.AGENT_TOOL_FINISHED) {
-                                return jsonEvent("tool_done", Map.<String, Object>of());
                             }
                         } catch (Exception e) {
-                            log.debug("SSE map error: {}", e.getMessage());
+                            log.debug("SSE flatMap error: {}", e.getMessage());
                         }
-                        return "";
+                        return Flux.empty();
                     })
-                    .filter(s -> !s.isEmpty())
+                    .doFinally(signal -> doneSink.tryEmitEmpty());
+
+            // Send SSE comments every 15s to keep the connection alive during long tool calls
+            Flux<String> keepalive = Flux.interval(Duration.ofSeconds(15))
+                    .map(i -> ": keepalive")
+                    .takeUntilOther(doneSink.asMono());
+
+            return Flux.merge(tokens, keepalive)
                     .doOnComplete(() -> {
+                        sseService.push(threadId, AgentEvent.allDone());
                         if (!aiResponse.isEmpty()) {
                             chatHistoryService.addMessage(threadId, "assistant", aiResponse.toString());
-                            // Auto-set title from first user message if not yet set
                             if (chatHistoryService.getTitle(threadId) == null) {
                                 chatHistoryService.setTitle(threadId, truncate(titleHint, 20));
                             }
                         }
+                    })
+                    .doOnError(e -> {
+                        log.error("Stream error for thread {}: {}", threadId, e.getMessage());
+                        sseService.push(threadId, AgentEvent.allDone());
+                    })
+                    .onErrorResume(e -> {
+                        String errorJson = jsonEvent("token", Map.<String, Object>of(
+                                "text", "\n\n抱歉，处理过程中出现错误: " + e.getMessage()));
+                        return Flux.just(errorJson);
                     });
         } catch (GraphRunnerException e) {
             log.error("Stream error for thread {}: {}", threadId, e.getMessage());

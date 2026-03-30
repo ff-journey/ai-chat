@@ -23,6 +23,7 @@ public class MilvusConfig {
     public MilvusClientV2 milvusClientV2(
             @Value("${spring.ai.vectorstore.milvus.client.host}") String host,
             @Value("${spring.ai.vectorstore.milvus.client.port}") int port,
+            @Value("${spring.ai.vectorstore.milvus.client.token}") String token,
             @Value("${spring.ai.vectorstore.milvus.client.connect-timeout-ms:10000}") long connectTimeout,
             @Value("${spring.ai.vectorstore.milvus.client.keep-alive-time-ms:55000}") long keepAliveTime,
             @Value("${spring.ai.vectorstore.milvus.client.keep-alive-timeout-ms:20000}") long keepAliveTimeout,
@@ -35,6 +36,7 @@ public class MilvusConfig {
                 .keepAliveTimeMs(keepAliveTime)
                 .keepAliveTimeoutMs(keepAliveTimeout)
                 .idleTimeoutMs(idleTimeout)
+                .token(token)
                 .secure(secure)
                 .build());
     }

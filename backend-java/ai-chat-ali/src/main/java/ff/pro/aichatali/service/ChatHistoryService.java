@@ -2,6 +2,7 @@ package ff.pro.aichatali.service;
 
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -57,6 +58,23 @@ public class ChatHistoryService {
 
     public void deleteThread(String threadId) {
         history.remove(threadId);
+        titles.remove(threadId);
+    }
+
+    public void deleteOlderThan(Duration maxAge) {
+        Instant cutoff = Instant.now().minus(maxAge);
+        getAllThreadInfos().forEach(info -> {
+            if (!info.updatedAt().isBlank()) {
+                try {
+                    Instant lastUpdated = Instant.parse(info.updatedAt());
+                    if (lastUpdated.isBefore(cutoff)) {
+                        history.remove(info.threadId());
+                        titles.remove(info.threadId());
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        });
     }
 
     public record MessageRecord(String role, String content, String timestamp, String imageUrl) {}

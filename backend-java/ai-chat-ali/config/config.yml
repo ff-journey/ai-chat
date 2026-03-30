@@ -1,0 +1,33 @@
+service:
+  port: ${value}
+
+ai:
+  llm:
+    model: ${value}
+    base-url: ${value}
+    api-key: ${value}
+  embedding:
+    model: ${value}
+    base-url: ${value}
+    api-key: ${value}
+  medical:
+    cnn.url: ${value}
+    model:
+      url: ${value}
+      name: ${value}
+  reranker:
+    api-key: ${value}
+    base-url: ${value}
+  web-search:
+    api-key: ${value}
+    base-url: ${value}
+
+vector-store:
+  host: ${value}
+  port: ${value}
+  token: ${value}
+
+
+
+logger:
+  level: ${value}

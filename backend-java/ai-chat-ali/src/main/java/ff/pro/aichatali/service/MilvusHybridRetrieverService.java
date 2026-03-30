@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -31,7 +32,7 @@ import java.util.stream.Stream;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class MilvusHybridRetrieverService implements java.util.function.BiFunction<MilvusHybridRetrieverService.Input, ToolContext, ToolResult> {
+public class MilvusHybridRetrieverService {
 
     public record Input(String query) {}
 
@@ -44,21 +45,12 @@ public class MilvusHybridRetrieverService implements java.util.function.BiFuncti
     final QueryRewriter queryRewriter;
     final RagChunkMapper ragChunkMapper;
 
-    @Override
-    public ToolResult apply(Input input, ToolContext toolContext) {
+    public ToolResult retrieve(Input query) {
         try {
-            return retrieve(input.query());
-        } catch (Exception e) {
-            log.error("MilvusHybridRetrieverService error: {}", e.getMessage(), e);
-            return ToolResult.error("查询失败, 知识库服务错误");
-        }
-    }
-
-    private ToolResult retrieve(String query) {
-        List<Document> reranked = hybridSearchAndRerank(query, 0.3f);
+        List<Document> reranked = hybridSearchAndRerank(query.query(), 0.3f);
         if (reranked.size() < 3) {
             log.info("query rewrite <------------->");
-            String stepBackQuery = queryRewriter.stepBack(query);
+            String stepBackQuery = queryRewriter.stepBack(query.query());
             reranked = hybridSearchAndRerank(stepBackQuery, 0f);
         }
         List<Document> finalChunks = parentFirst(reranked, 6);
@@ -67,6 +59,10 @@ public class MilvusHybridRetrieverService implements java.util.function.BiFuncti
                 .filter(StringUtils::isNotBlank)
                 .collect(Collectors.joining("\n\n---\n\n"));
         return ToolResult.ok(StringUtils.isNotBlank(content) ? content : "未查询到相关内容");
+        } catch (Exception e) {
+            log.error("MilvusHybridRetrieverService error: {}", e.getMessage(), e);
+            return ToolResult.error("查询失败, 知识库服务错误");
+        }
     }
 
     private List<Document> hybridSearchAndRerank(String query, float rerankScore) {
@@ -125,7 +121,7 @@ public class MilvusHybridRetrieverService implements java.util.function.BiFuncti
 
     // ── auto-merge (copied from MemoryHybridRetrieverService) ─────────────────
 
-    public List<Document> autoMerge(List<Document> leafChunks, int threshold) {
+    private List<Document> autoMerge(List<Document> leafChunks, int threshold) {
         List<Document> current = new ArrayList<>(leafChunks);
         for (int round = 0; round < 2; round++) {
             current = mergeSingleLevel(current, threshold);

@@ -11,14 +11,70 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-light.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        .login-overlay {
+            position: absolute;
+            inset: 0;
+            background: var(--white);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+        .login-card {
+            background: #fff;
+            border-radius: 16px;
+            padding: 2.5rem 2rem;
+            width: 360px;
+            max-width: 90vw;
+            box-shadow: 0 8px 32px rgba(120,80,200,0.15);
+            text-align: center;
+        }
+        .login-logo { margin-bottom: 0.75rem; }
+        .login-card h2 { margin: 0 0 1.5rem; color: #7c5cbf; }
+        .login-form {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .login-form input {
+            padding: 0.75rem 1rem;
+            border: 2px solid #e0d9f0;
+            border-radius: 8px;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .login-form input:focus { border-color: #7c5cbf; }
+    </style>
 </head>
 <body>
 
 
 <div id="app" class="app-wrapper">
 
+    <!-- ═══ Login / Register Panel ════════════════════════════════════════════ -->
+    <div v-if="!loggedIn" class="login-overlay">
+        <div class="login-card">
+            <div class="login-logo"><img src="./media/shushu.gif" alt="logo" style="width:64px;height:64px;" /></div>
+            <h2>鼠鼠智能助手</h2>
+            <div class="login-form">
+                <input type="text" v-model="loginForm.username" placeholder="用户名"
+                       @keyup.enter="registerMode ? register() : login()" />
+                <input type="password" v-model="loginForm.password" placeholder="密码"
+                       @keyup.enter="registerMode ? register() : login()" />
+                <button @click="registerMode ? register() : login()" class="btn-primary" style="width:100%">
+                    {{ registerMode ? '注册' : '登录' }}
+                </button>
+                <button @click="registerMode = !registerMode" class="btn-secondary" style="width:100%;margin-top:0">
+                    {{ registerMode ? '已有账号？去登录' : '没有账号？去注册' }}
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- ═══ Sidebar ═══════════════════════════════════════════════════════════ -->
-    <aside class="sidebar">
+    <aside v-if="loggedIn" class="sidebar">
         <div class="sidebar-header">
             <div class="logo-icon"><img src="./media/shushu.gif" alt="logo" /></div>
             <h2>鼠鼠助手</h2>
@@ -42,7 +98,7 @@
     </aside>
 
     <!-- ═══ Main Content ══════════════════════════════════════════════════════ -->
-    <main class="main-content">
+    <main v-if="loggedIn" class="main-content">
 
         <!-- ─── Settings / Document Management ──────────────────────────────── -->
         <div v-if="activeNav === 'settings'" class="settings-panel">
@@ -145,12 +201,14 @@
                     <span>鼠鼠在线中...</span>
                 </div>
                 <div class="header-actions">
+                    <span style="font-size:0.85rem;color:#888;margin-right:0.5rem;">{{ username }}</span>
+                    <button @click="logout" class="icon-btn" title="退出登录"><i class="fas fa-sign-out-alt"></i></button>
                     <button class="icon-btn" title="更多"><i class="fas fa-ellipsis-h"></i></button>
                 </div>
             </header>
 
             <!-- Messages -->
-            <div class="chat-container" ref="chatContainer">
+            <div class="chat-container" ref="chatContainer" @scroll="handleChatScroll">
                 <div v-if="messages.length === 0" class="welcome-screen">
                     <div class="big-avatar"><img src="./media/shushu.gif" alt="avatar" /></div>
                     <h3>你好呀！我是鼠鼠</h3>
@@ -196,11 +254,73 @@
 
                     <!-- Bot: response text -->
                     <template v-else-if="!msg.isUser">
-                        <!-- Tool-call badge(s) -->
-                        <div v-if="msg.toolEvents && msg.toolEvents.length" class="tool-events-row">
-                            <span v-for="(tc, ti) in msg.toolEvents" :key="ti" class="tool-event-badge">
-                                <i class="fas fa-cog"></i> 工具调用完成
-                            </span>
+                        <!-- Execution timeline (Cursor-style tree) -->
+                        <div v-if="msg.progressSteps && msg.progressSteps.length" class="exec-timeline">
+                            <div v-for="(step, si) in msg.progressSteps" :key="si" class="tl-node">
+                                <div class="tl-connector">
+                                    <span class="tl-branch">{{ si === msg.progressSteps.length - 1 ? '└─' : '├─' }}</span>
+                                </div>
+                                <div class="tl-content">
+                                    <!-- Header: icon + name + timer (always visible) -->
+                                    <div class="tl-header" @click.stop="step.expanded = !step.expanded">
+                                        <span class="tl-icon-wrap">
+                                            <i :class="['fas', step.icon || 'fa-wrench']"></i>
+                                            <i v-if="step.done && !step.error" class="fas fa-check tl-done-badge"></i>
+                                            <i v-if="step.error" class="fas fa-times tl-error-badge"></i>
+                                            <span v-if="!step.done && !step.error" class="tl-spinner"></span>
+                                        </span>
+                                        <span class="tl-label">{{ step.displayName || step.name }}</span>
+                                        <span class="tl-timer" :class="{active: !step.done}">{{ step.elapsed }}s</span>
+                                        <i v-if="step.inputPreview || step.outputPreview"
+                                           class="fas fa-chevron-right tl-chevron" :class="{rotated: step.expanded}"></i>
+                                    </div>
+
+                                    <!-- Detail panel (click to expand) -->
+                                    <div v-if="step.expanded && (step.inputPreview || (step.done && step.outputPreview))" class="tl-details">
+                                        <div v-if="step.inputPreview" class="tl-detail-row">
+                                            <span class="tl-detail-label"><i class="fas fa-arrow-right"></i> 输入</span>
+                                            <pre class="tl-detail-content">{{ step.inputPreview }}</pre>
+                                        </div>
+                                        <div v-if="step.done && step.outputPreview" class="tl-detail-row">
+                                            <span class="tl-detail-label"><i class="fas fa-arrow-left"></i> 结果</span>
+                                            <pre class="tl-detail-content tl-output">{{ step.outputPreview }}</pre>
+                                        </div>
+                                    </div>
+
+                                    <!-- Sub-steps (always visible, not gated by expanded) -->
+                                    <div v-if="step.subSteps && step.subSteps.length" class="tl-subtree">
+                                        <div v-for="(sub, ssi) in step.subSteps" :key="ssi" class="tl-node tl-sub">
+                                            <div class="tl-connector">
+                                                <span class="tl-branch">{{ ssi === step.subSteps.length - 1 ? '└─' : '├─' }}</span>
+                                            </div>
+                                            <div class="tl-content">
+                                                <div class="tl-header" @click.stop="sub.expanded = !sub.expanded">
+                                                    <span class="tl-icon-wrap">
+                                                        <i :class="['fas', sub.icon || 'fa-wrench']"></i>
+                                                        <i v-if="sub.done && !sub.error" class="fas fa-check tl-done-badge"></i>
+                                                        <i v-if="sub.error" class="fas fa-times tl-error-badge"></i>
+                                                        <span v-if="!sub.done && !sub.error" class="tl-spinner"></span>
+                                                    </span>
+                                                    <span class="tl-label">{{ sub.displayName || sub.name }}</span>
+                                                    <span class="tl-timer" :class="{active: !sub.done}">{{ sub.elapsed }}s</span>
+                                                    <i v-if="sub.inputPreview || sub.outputPreview"
+                                                       class="fas fa-chevron-right tl-chevron" :class="{rotated: sub.expanded}"></i>
+                                                </div>
+                                                <div v-if="sub.expanded && (sub.inputPreview || (sub.done && sub.outputPreview))" class="tl-details">
+                                                    <div v-if="sub.inputPreview" class="tl-detail-row">
+                                                        <span class="tl-detail-label"><i class="fas fa-arrow-right"></i> 输入</span>
+                                                        <pre class="tl-detail-content">{{ sub.inputPreview }}</pre>
+                                                    </div>
+                                                    <div v-if="sub.done && sub.outputPreview" class="tl-detail-row">
+                                                        <span class="tl-detail-label"><i class="fas fa-arrow-left"></i> 结果</span>
+                                                        <pre class="tl-detail-content tl-output">{{ sub.outputPreview }}</pre>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <div class="message-content"
                              v-html="parseMarkdown(msg.text)"></div>

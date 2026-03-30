@@ -29,7 +29,7 @@ public class SessionController {
     private ChatHistoryService chatHistoryService;
 
     @Autowired
-    @Qualifier("supervisor_agent")
+    @Qualifier("supervisorAgent")
     private ReactAgent supervisorAgent;
 
     /**

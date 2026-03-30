@@ -1,36 +1,70 @@
 package ff.pro.aichatali.service;
 
+import ff.pro.aichatali.controller.dto.ToolDto;
 import ff.pro.aichatali.tool.PluggableTool;
+import jakarta.annotation.PostConstruct;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.IntStream;
 
-/**
- * Collects all PluggableTool beans registered in the application context
- * and exposes them to the agent builder.
- * To enable/disable a tool, set tools.<name>.enabled=true/false in application.yml.
- */
 @Service
 @Slf4j
 public class ToolRegistryService {
+    @Lazy
+    @Autowired
+    List<PluggableTool> pluggableTools;
 
-    @Autowired(required = false)
-    private List<PluggableTool> tools = List.of();
 
-    public List<ToolCallback> getToolCallbacks() {
-        List<String> names = tools.stream().map(PluggableTool::name).toList();
+    @Getter
+    private final Map<String, PluggableTool> toolMap = new ConcurrentHashMap<>();
+    @Getter
+    private List<ToolDto> supportTools;
+    @Getter
+    private List<ToolCallback> tools = List.of();
+
+    @PostConstruct
+    public void init() {
+        List<String> names = pluggableTools.stream().map(PluggableTool::getName).toList();
         log.info("Active tools: {}", names);
-        return tools.stream().map(PluggableTool::toolCallback).toList();
+        List<ToolCallback> toolCallbacks = new ArrayList<>();
+        supportTools = IntStream.range(0, pluggableTools.size())
+                .mapToObj(i -> {
+                    ToolDto toolDto = new ToolDto(
+                            pluggableTools.get(i).getName(),
+                            pluggableTools.get(i).getTitle(),
+                            pluggableTools.get(i).getDescription(),
+                            pluggableTools.get(i).getMutuallyExclusiveWith(),
+                            1 << i,
+                            pluggableTools.get(i).getToolIcon()
+                    );
+                    toolMap.put(toolDto.name(), pluggableTools.get(i));
+                    toolCallbacks.add(pluggableTools.get(i).getToolCallback());
+                    return toolDto;
+                })
+                .toList();
+        tools = List.copyOf(toolCallbacks);
+        log.info("Support tools: {}", supportTools);
     }
 
-    public List<String> getToolNames() {
-        return tools.stream().map(PluggableTool::name).toList();
-    }
+    public List<ToolCallback> dynamicCallbacks(int toolFlag) {
+        if (toolFlag == 0) {
+            return List.of();
+        }
 
-    public List<PluggableTool> getTools() {
-        return tools;
+        return IntStream.range(0, pluggableTools.size())
+                .filter(i -> (toolFlag & (1 << i)) != 0)
+                .mapToObj(i -> pluggableTools.get(i).getToolCallback())
+                .toList();
     }
 }

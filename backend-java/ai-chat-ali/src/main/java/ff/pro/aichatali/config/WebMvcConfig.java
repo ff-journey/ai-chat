@@ -1,9 +1,11 @@
 package ff.pro.aichatali.config;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.servlet.config.annotation.AsyncSupportConfigurer;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -21,6 +23,26 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     @Value("${app.samples.dir:samples}")
     private String samplesDir;
+
+    @Autowired
+    private AuthInterceptor authInterceptor;
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(authInterceptor)
+                .addPathPatterns("/**")
+                .excludePathPatterns(
+                        "/api/auth/**",
+                        "/sse/**",
+                        "/",
+                        "/index.html",
+                        "/*.js", "/*.css", "/*.ico",
+                        "/media/**",
+                        "/uploads/**",
+                        "/samples/**",
+                        "/api/samples/**"
+                );
+    }
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {

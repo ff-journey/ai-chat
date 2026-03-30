@@ -9,11 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * @author: JianFuQiang
- * @date: 2021/6/2
- * @desc:
- */
+
 public class RequestContext {
 
     private static final ThreadLocal<RequestContext> REQUEST_CONTEXT = new ThreadLocal<>();
@@ -27,6 +23,10 @@ public class RequestContext {
     private final List<Runnable> thirdWork = new ArrayList<>();
     @Setter
     private long deviceLibraryId = 0;
+    @Setter
+    int toolFlag;
+
+
 
     public void addThirdWork(Runnable runnable) {
         thirdWork.add(runnable);
@@ -74,6 +74,7 @@ public class RequestContext {
         newContext.request = currentContext.request;
         newContext.userInfo = currentContext.userInfo;
         newContext.deviceLibraryId = currentContext.deviceLibraryId;
+        newContext.toolFlag = currentContext.toolFlag;
 
         // 注意：rollback 和 thirdWork 不应该被复制，因为它们是线程本地的执行任务
 
@@ -99,9 +100,9 @@ public class RequestContext {
             return deviceLibraryId;
         }
         if (request!=null) {
-            String deviceLibraryIdStr = request.getHeader("X-Device-Library-Id");
+            String deviceLibraryIdStr = request.getHeader("X-Tenant-Id");
             if (deviceLibraryIdStr == null) {
-                deviceLibraryIdStr = request.getParameter("deviceLibraryId");
+                deviceLibraryIdStr = request.getParameter("tenantId");
             }
             if (deviceLibraryIdStr != null && !deviceLibraryIdStr.isEmpty()) {
                 try {
@@ -128,25 +129,27 @@ public class RequestContext {
     }
 
     public String getToken() {
-        String token = this.request.getHeader("X-CSRF-Token");
+        String token = this.request.getHeader("X-Token");
         if (StringUtils.isEmpty(token)) {
             token = request.getParameter("token");
         }
         return token;
     }
 
-    public String getRoomId() {
-        return this.request.getHeader("X-DFSX-RoomId");
+    public int getToolFlag() {
+        if (this.request == null) return this.toolFlag;
+        String toolFlag = this.request.getHeader("X-Tool-Flag");
+        if (StringUtils.isBlank(toolFlag)) {
+            return 0;
+        }
+        return Integer.parseInt(toolFlag);
     }
 
-    public String getAuth() {
-        return this.request.getHeader("X-DFSX-Auth");
-    }
 
     public String getIp() {
         String ip = null;
         if (this.getRequest().isPresent()) {
-            ip = this.request.getHeader("X-DFSX-SubnetIP");
+            ip = this.request.getHeader("X-SubnetIP");
             if (StringUtils.isBlank(ip)) {
                 ip = this.request.getHeader("X-Real-IP");
             }
@@ -168,13 +171,6 @@ public class RequestContext {
         return userHost;
     }
 
-    public String getMachine() {
-        String machine = "";
-        if (this.getRequest().isPresent()) {
-            machine = this.request.getRemoteHost();
-        }
-        return machine == null ? "" : machine;
-    }
 
     public UserSimpleDto getUserInfo() {
         return Optional.ofNullable(this.userInfo).orElse(new UserSimpleDto(0));
@@ -185,6 +181,6 @@ public class RequestContext {
         if (request == null) {
             return false;
         }
-        return request.getHeader("x-dfsx-request-protocol") != null && request.getHeader("x-dfsx-request-protocol").equals("https");
+        return request.getHeader("x-request-protocol") != null && request.getHeader("x-request-protocol").equals("https");
     }
 }

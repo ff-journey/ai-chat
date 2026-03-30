@@ -13,8 +13,10 @@ import java.util.Map;
 @Service
 public class RerankService {
 
-    @Value("${jina.api-key}")
-    private String jinaApiKey;
+    @Value("${reranker.api-key}")
+    private String rerankerApiKey;
+    @Value("${reranker.base-url}")
+    private String rerankerApiUrl;
 
     private final RestClient restClient = RestClient.create();
 
@@ -30,8 +32,8 @@ public class RerankService {
         );
 
         RerankResponse response = restClient.post()
-                .uri("https://api.jina.ai/v1/rerank")
-                .header("Authorization", "Bearer " + jinaApiKey)
+                .uri(rerankerApiUrl)
+                .header("Authorization", "Bearer " + rerankerApiKey)
                 .header("Content-Type", "application/json")
                 .body(body)
                 .retrieve()

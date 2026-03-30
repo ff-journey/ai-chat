@@ -40,7 +40,7 @@ ff.pro.aichatali/
 │   ├── ChatStreamController    (legacy) /api/chat/multimodal* — preserved, not removed
 │   └── UserAuthController      /api/auth/*
 ├── service/
-│   ├── ChatHistoryService      In-memory message + title store (ConcurrentHashMap)
+│   ├── ChatHistoryService      In-memory message + title store (ConcurrentHashMap); deleteOlderThan(Duration)
 │   ├── DocumentService         Upload → UUID rename → Milvus index
 │   ├── ToolRegistryService     Collects List<PluggableTool> beans, exposes getToolCallbacks()
 │   ├── MemoryHybridRetrieverService  BM25 + vector hybrid retrieval + rerank + grading
@@ -48,21 +48,27 @@ ff.pro.aichatali/
 │   ├── RerankService           HTTP rerank (Jina or custom)
 │   ├── GradingService          LLM relevance grading
 │   ├── QueryRewriter           LLM query rewriting
-│   └── UserService
+│   ├── UserService             In-memory users: admin(id=0) preset; register/login return UserSimpleDto
+│   ├── AuthService             Token store: issueToken(userId)/validateAndGetUserId(token)/expireAll()
+│   └── CleanupService          @Scheduled: expire tokens hourly, delete history >7d
 ├── service/rag/
 │   ├── BM25Service
 │   └── RRFMerger
 ├── service/websearch/
 │   ├── WebSearchPort           Interface
-│   ├── TavilyWebSearchService
-│   └── WebSearchTool
+│   └── TavilyWebSearchService
 ├── tool/                       Each tool = Spring @Component implementing PluggableTool
-│   ├── PluggableTool.java      Interface: name() / description() / toolCallback()
-│   ├── rag_tool/RagPluggableTool
-│   ├── fetch_tool/WebSearchPluggableTool
+│   ├── PluggableTool.java      Interface: name() / description() / toolCallback() / mutuallyExclusiveWith()
+│   ├── rag_tool/
+│   │   ├── RagPluggableTool      Hybrid retrieval (Milvus BM25 + vector)
+│   │   ├── RagTool               BiFunction delegate
+│   │   ├── RagAgentPluggableTool Sub-agent: RAG + web-search fallback
+│   │   └── RagAgentTool          ReactAgent wrapping ragSearch + webSearch
+│   ├── fetch_tool/
+│   │   ├── WebSearchPluggableTool
+│   │   └── WebSearchTool         BiFunction delegate
 │   ├── feiyan_tool/
-│   │   ├── FeiyanPluggableTool   Wraps FeiyanAgentMedicalTool as PluggableTool
-│   │   ├── FeiyanAgentMedicalTool  Sub-agent tool (supervisor delegates to it)
+│   │   ├── FeiyanPluggableTool   Chest X-ray CNN classification
 │   │   └── FeiyanCnnTool         HTTP call to Python CNN at 9801
 │   └── medical_tool/
 │       ├── MedicalDiagnosisPluggableTool
@@ -72,11 +78,12 @@ ff.pro.aichatali/
 │   ├── RagChunkMapper
 │   └── RagChunkMapperImpl
 ├── config/
-│   ├── AgentConfig             Builds supervisor_agent from ToolRegistryService
+│   ├── AgentConfig             Builds supervisorAgent from ToolRegistryService
+│   ├── AuthInterceptor         Token auth; whitelist: /api/auth/**, /, /*.js, /*.css, /media/**, /uploads/**, /api/samples/**
 │   ├── MedicalToolConfig       Binds medical.cnn.url / medical.vllm.url
 │   ├── MilvusConfig
 │   ├── VectorStoreConfig
-│   ├── WebMvcConfig            Static resource mappings, CORS
+│   ├── WebMvcConfig            Static resource mappings, CORS, AuthInterceptor registration
 │   └── HttpClientConfig
 ├── common/
 │   ├── HierarchicalDocSplitter
@@ -96,24 +103,47 @@ public interface PluggableTool {
     String name();
     String description();
     ToolCallback toolCallback();
+    default List<String> mutuallyExclusiveWith() { return List.of(); }
 }
 ```
 
 All tools use `@ConditionalOnProperty(name = "tools.<name>.enabled", havingValue = "true", matchIfMissing = true)`. Toggle in `application.yml` under `tools:` without code changes.
 
-`ToolRegistryService` collects all `List<PluggableTool>` beans via Spring autowiring and exposes `getToolCallbacks()`. `AgentConfig.supervisorAgent()` reads from it — no hardcoded tool list.
+`ToolRegistryService` collects all `List<PluggableTool>` beans via Spring autowiring and exposes `getToolCallbacks()`.
+
+#### Mutual Exclusion Rules
+
+Declared by each tool via `mutuallyExclusiveWith()`. Returned in `/api/tools` response so the frontend can auto-deselect conflicting tools:
+
+| Tool | Mutually exclusive with |
+|---|---|
+| `ragTool` | `ragAgentTool` |
+| `ragAgentTool` | `ragTool`, `webSearchTool` |
+| `webSearchTool` | `ragAgentTool` |
 
 ### Multi-Agent Supervisor Pattern
 
 `config/AgentConfig.java` builds:
-- **`supervisor_agent`** — top-level, delegates to feiyan/medical sub-agents + uses RAG/web-search tools directly
-- Sub-agents wrapped as `FunctionToolCallback` with isolated `threadId` for memory
+- **`supervisorMemorySaver`** — singleton `MemorySaver` bean shared across all agent instances
+- **`supervisorAgent`** — default singleton agent with all tools; used when `enabledTools` is not specified
+- Per-request agent — built in `ChatController.resolveAgent()` when `enabledTools` is provided; reuses the same `MemorySaver` so conversation history persists by `threadId`
 
 All agents use `MemorySaver` (in-memory, lost on restart).
+
+### Auth Flow
+
+```
+POST /api/auth/login|register → UserService → AuthService.issueToken() → {token, userId, username}
+    Frontend stores token in localStorage, sends as X-Token header on every request
+    AuthInterceptor validates token → sets RequestContext.userInfo + request
+    Tokens expire after 2h; CleanupService purges hourly
+    Same account login again → old token revoked immediately (single session)
+```
 
 ### ThreadId Convention
 
 `userId + "_" + sessionId` (or bare `sessionId` when userId is "default").
+`userId` comes from the login response (numeric id, e.g. "1"), stored in localStorage.
 `SessionController.listSessions()` strips the prefix before returning to frontend.
 
 ### Frontend
@@ -126,9 +156,11 @@ Served at `http://localhost:8080/` — no Node.js/pnpm required.
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/chat/stream` | JSON body `{message,userId,sessionId}`; SSE JSON events |
-| POST | `/chat/stream/image` | multipart `{image,message,userId,sessionId}` |
-| POST | `/chat/stream/sample` | form params `{sampleId,message,userId,sessionId}` |
+| POST | `/api/auth/register` | `{username,password}` → `{success,token,userId,username}` |
+| POST | `/api/auth/login` | `{username,password}` → `{success,token,userId,username}` |
+| POST | `/chat/stream` | `X-Token`+`X-Tool-Flag` headers; JSON body `{message,userId,sessionId}`; SSE |
+| POST | `/chat/stream/image` | `X-Token`+`X-Tool-Flag` headers; multipart `{image,message,userId,sessionId}` |
+| POST | `/chat/stream/sample` | `X-Token`+`X-Tool-Flag` headers; form params `{sampleId,message,userId,sessionId}` |
 | GET | `/sessions/{userId}` | `{sessions:[{sessionId,title,messageCount,updatedAt}]}` |
 | GET | `/sessions/{userId}/{sessionId}` | `{messages:[{messageType,content,imageUrl?}]}` |
 | DELETE | `/sessions/{userId}/{sessionId}` | 204 |
@@ -136,7 +168,7 @@ Served at `http://localhost:8080/` — no Node.js/pnpm required.
 | POST | `/documents/upload` | multipart → `{filename,chunks,url,message}` |
 | GET | `/documents` | `{documents:[{filename,originalFilename,fileType,sizeBytes,url}]}` |
 | DELETE | `/documents/{filename}` | deletes file + Milvus chunks |
-| GET | `/api/tools` | `[{name,description}]` |
+| GET | `/api/tools` | `[{name,description,mutuallyExclusiveWith:[...]}]` |
 | GET | `/api/samples` | `[{category,label,images:[{filename,label}]}]` |
 | GET | `/api/samples/{category}/{filename}` | image binary |
 | POST | `/api/chat/summary` | `{messages:[...]}` → `{summary:"..."}` LLM title generation |
@@ -153,8 +185,9 @@ Served at `http://localhost:8080/` — no Node.js/pnpm required.
 ```yaml
 tools:
   rag.enabled: true
-  web-search.enabled: true
-  feiyan.enabled: true
+  rag-agent.enabled: true
+  websearch.enabled: true
+  pneumonia.enabled: true
   medical-diagnosis.enabled: true
 
 medical:

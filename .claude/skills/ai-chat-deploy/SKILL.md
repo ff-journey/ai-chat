@@ -25,6 +25,7 @@ All scripts live under the project's `deploy/ecs/` directory (relative to repo r
 
 ```
 deploy/ecs/
+├── setup.sh           # bash setup.sh  (first-time) install SDKMAN + JDK
 ├── java-app.sh        # bash java-app.sh start | stop
 ├── frps.sh            # bash frps.sh start | stop
 └── config/
@@ -32,27 +33,23 @@ deploy/ecs/
     └── frps.toml      # frps config (auth.token must match frpc.toml)
 ```
 
+JDK version is declared in `.sdkmanrc` at the project root. `java-app.sh` sources SDKMAN and switches to that version automatically on each start.
+
 Home machine scripts: `deploy/home/` (run manually by user via PowerShell).
 
-## SSH Operations (ECS)
+## ECS Connection
 
-When the user provides SSH credentials, use `ssh` or `scp` via Bash to operate remotely.
+- IP: `1.14.109.188`
+- SSH: `ssh root@1.14.109.188` (public key auth, no password needed)
+- OS: OpenCloudOS 9, x86_64
+- Project root on ECS: `~/ai-chat`
 
 ```bash
-# Connect
-ssh <user>@<host>
-
 # Run remote command
-ssh <user>@<host> "cd <project_dir> && bash deploy/ecs/java-app.sh start"
+ssh root@1.14.109.188 "cd ~/ai-chat/deploy/ecs && bash java-app.sh start"
 
 # Upload JAR
-scp backend-java/ai-chat-ali/build/libs/ai-chat-ali.jar <user>@<host>:<project_dir>/backend-java/ai-chat-ali/build/libs/
-```
-
-For password-based SSH, use `sshpass`:
-```bash
-sshpass -p '<password>' ssh <user>@<host> "<command>"
-sshpass -p '<password>' scp <local> <user>@<host>:<remote>
+scp backend-java/ai-chat-ali/build/libs/ai-chat-ali.jar root@1.14.109.188:~/ai-chat/backend-java/ai-chat-ali/build/libs/
 ```
 
 ## Common Operations
@@ -105,8 +102,18 @@ scp build/libs/ai-chat-ali.jar <user>@<host>:<project>/backend-java/ai-chat-ali/
 ssh ... "cd <project>/deploy/ecs && bash java-app.sh start"
 ```
 
-### First-time Setup on ECS
-See `references/ecs-setup.md` for full first-time setup steps (Java install, frps install, .env config, git clone).
+### First-time Setup
+- ECS environment (SDKMAN, JDK, git clone, .env): see `references/ecs-setup.md`
+- ECS frps install & config: see `references/frp-setup-ecs.md`
+- Home frpc install & config: see `references/frp-setup-home.md`
+
+Quick ECS bootstrap order:
+```bash
+bash deploy/ecs/setup.sh          # install SDKMAN + JDK (idempotent)
+# configure .env and frps.toml, upload JAR, then:
+bash deploy/ecs/frps.sh start
+bash deploy/ecs/java-app.sh start
+```
 
 ## Environment Variables (.env on ECS)
 

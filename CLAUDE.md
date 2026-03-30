@@ -134,6 +134,7 @@ public interface PluggableTool {
 ```
 deploy/
 ├── ecs/
+│   ├── setup.sh             # bash setup.sh  （首次）安装 SDKMAN + JDK
 │   ├── java-app.sh          # bash java-app.sh start | stop
 │   ├── frps.sh              # bash frps.sh start | stop
 │   └── config/
@@ -146,10 +147,15 @@ deploy/
         └── frpc.toml        # 填 serverAddr + auth.token，代理 9801/9901
 ```
 
+JDK 版本声明在项目根 `.sdkmanrc`，`java-app.sh` 启动时自动通过 SDKMAN 切换到指定版本。
+
 ### 首次部署操作流程
 
 #### ECS 端
 ```bash
+# 0. 初始化环境（安装 SDKMAN + 项目所需 JDK，仅首次）
+bash deploy/ecs/setup.sh
+
 # 1. 构建 JAR 并上传
 cd backend-java/ai-chat-ali && ./gradlew build
 scp build/libs/ai-chat-ali.jar user@ECS:~/deploy/ecs/../../backend-java/ai-chat-ali/build/libs/

@@ -6,7 +6,7 @@ import org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConf
 import org.springframework.ai.vectorstore.milvus.autoconfigure.MilvusVectorStoreAutoConfiguration;
 
 @SpringBootApplication(exclude = {
-        OpenAiEmbeddingAutoConfiguration.class,
+//        OpenAiEmbeddingAutoConfiguration.class,
         MilvusVectorStoreAutoConfiguration.class
 })
 public class AiChatAliApplication {

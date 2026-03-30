@@ -12,11 +12,7 @@ import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * @author: JianFuQiang
- * @date: 2021/6/25
- * @desc:
- */
+
 @Configuration
 @Slf4j
 public class ThreadPoolHelper {
