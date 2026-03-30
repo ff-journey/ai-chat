@@ -139,19 +139,39 @@ public class ChatController {
                     .flatMap(o -> {
                         StreamingOutput<?> so = (StreamingOutput<?>) o;
                         try {
+                            OutputType type = so.getOutputType();
                             String text = so.message() != null ? so.message().getText() : null;
-                            if (so.getOutputType() == OutputType.AGENT_MODEL_STREAMING) {
+                            if (type == OutputType.AGENT_MODEL_STREAMING) {
                                 if (text != null && !text.isEmpty()) {
                                     aiResponse.append(text);
+//                                    log.debug("[STREAM] token len={}, total={}", text.length(), aiResponse.length());
                                     return Flux.just(jsonEvent("token", Map.<String, Object>of("text", text)));
+                                }
+                            } else if (type == OutputType.AGENT_MODEL_FINISHED) {
+                                // Fallback: if streaming tokens were missed, emit the full response
+                                log.info("[FINISHED] text len={}, alreadySent len={}",
+                                        text != null ? text.length() : 0, aiResponse.length());
+                                if (text != null && !text.isEmpty()) {
+                                    String alreadySent = aiResponse.toString();
+                                    if (alreadySent.isEmpty()) {
+                                        aiResponse.append(text);
+                                        return Flux.just(jsonEvent("token", Map.<String, Object>of("text", text)));
+                                    } else if (text.length() > alreadySent.length() && text.startsWith(alreadySent)) {
+                                        String remaining = text.substring(alreadySent.length());
+                                        aiResponse.append(remaining);
+                                        return Flux.just(jsonEvent("token", Map.<String, Object>of("text", remaining)));
+                                    }
                                 }
                             }
                         } catch (Exception e) {
-                            log.debug("SSE flatMap error: {}", e.getMessage());
+                            log.warn("SSE flatMap error (type={}): {}", so.getOutputType(), e.getMessage(), e);
                         }
                         return Flux.empty();
                     })
                     .doOnComplete(() -> {
+                        log.info("[COMPLETE] aiResponse len={}, content={}",
+                                aiResponse.length(),
+                                aiResponse.length() > 100 ? aiResponse.substring(0, 100) + "..." : aiResponse);
                         sseService.push(threadId, TraceEvent.spanEnd(rootSpan, "ok", null));
                         if (!aiResponse.isEmpty()) {
                             chatHistoryService.addMessage(threadId, "assistant", aiResponse.toString());
@@ -170,6 +190,7 @@ public class ChatController {
                         return Flux.just(errorJson);
                     })
                     .doFinally(signal -> {
+                        log.info("[FINALLY] signal={}, aiResponse len={}", signal, aiResponse.length());
                         sseService.complete(threadId);
                         doneSink.tryEmitEmpty();
                     });

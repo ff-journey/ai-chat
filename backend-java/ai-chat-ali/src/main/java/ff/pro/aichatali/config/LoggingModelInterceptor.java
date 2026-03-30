@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
@@ -42,12 +43,9 @@ public class LoggingModelInterceptor extends ModelInterceptor {
         SpanContext span = SpanContext.create(SpanContext.SpanType.LLM, agentName + "_llm", parentSpanId);
 
         Message last = request.getMessages().getLast();
-        String inputPreview = last.getText();
-        if (inputPreview != null && inputPreview.length() > 200) {
-            inputPreview = inputPreview.substring(0, 200) + "...";
-        }
-        log.info("=== LLM Call Start [{}] Last Input: {}", agentName, inputPreview);
-
+        String inputPreview = messagePreview(last, 20);
+        log.info("=== LLM Call Start [{}] Last Message({}): {}",
+                agentName, last.getClass().getSimpleName(), inputPreview);
         if (threadId != null) {
             sseService.push(threadId, TraceEvent.spanStart(span));
         }
@@ -76,6 +74,7 @@ public class LoggingModelInterceptor extends ModelInterceptor {
             AtomicReference<StringBuilder> buffer = new AtomicReference<>(new StringBuilder());
             Flux<ChatResponse> flux = (Flux<ChatResponse>) response.getMessage();
             boolean isSupervisor = "supervisor".equals(agentName);
+            ModelRequest finalRequest = request;
             Flux<ChatResponse> wrapped = flux.doOnNext(chunk -> {
                 if (chunk.getResult() != null && chunk.getResult().getOutput() != null) {
                     String text = chunk.getResult().getOutput().getText();
@@ -86,8 +85,20 @@ public class LoggingModelInterceptor extends ModelInterceptor {
                         }
                     }
                 }
+            }).doOnError(e -> {
+                log.error("=== LLM Call Error [{}] ({}ms)", agentName,
+                        System.currentTimeMillis() - startTime, e);
+                log.debug("=== LLM Call Error [{}]", finalRequest.getMessages().toString());
+                if (threadId != null) {
+                    sseService.push(threadId, TraceEvent.spanEnd(span, "error", e.getMessage()));
+                }
             }).doOnComplete(() -> {
-                log.info("=== LLM Call End [{}] ({}ms)", agentName, System.currentTimeMillis() - startTime);
+                String fullText = buffer.get().toString();
+                String res = fullText.length() > 200
+                        ? fullText.substring(0, 200) + "..."
+                        : fullText;
+                log.info("=== LLM Call End [{}] ({}ms), {}", agentName,
+                        System.currentTimeMillis() - startTime, res);
                 if (threadId != null) {
                     sseService.push(threadId, TraceEvent.spanEnd(span, "ok", null));
                 }
@@ -95,11 +106,28 @@ public class LoggingModelInterceptor extends ModelInterceptor {
             return ModelResponse.of(wrapped);
         } else {
             AssistantMessage msg = (AssistantMessage) response.getMessage();
-            log.info("=== LLM Call End [{}] ({}ms)", agentName, System.currentTimeMillis() - startTime);
-            if (threadId != null) {
-                sseService.push(threadId, TraceEvent.spanEnd(span, "ok", null));
+            String text = msg.getText();
+            if (text != null && text.length() > 200) {
+                text = text.substring(0, 200) + "...";
             }
+            log.info("=== LLM Call End [{}] ({}ms), {}", agentName,
+                    System.currentTimeMillis() - startTime, text);
             return response;
         }
+    }
+
+    private String messagePreview(Message m, int maxLen) {
+        String text;
+        if (m instanceof ToolResponseMessage trm) {
+            text = trm.getResponses().toString();
+        } else if (m instanceof AssistantMessage am) {
+            text = "text=" + am.getText() + ", toolCalls=" + am.getToolCalls();
+        } else {
+            text = m.getText();
+        }
+        if (text != null && text.length() > maxLen) {
+            text = text.substring(0, maxLen) + "...";
+        }
+        return m.getClass().getSimpleName() + ": " + text;
     }
 }

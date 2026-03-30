@@ -49,7 +49,10 @@ public class ToolCallCapture extends ToolInterceptor {
         try {
             log.debug("Tool {} called: {}", toolName, request.getArguments());
             response = handler.call(request);
-            log.debug("Tool {} result: {}", toolName, response.getStatus());
+            String result = response.getResult();
+            String output = result != null && result.length() > 20
+                    ? result.substring(0, 20) + "..." : result;
+            log.debug("Tool {} result: {}", toolName, output);
         } catch (Exception e) {
             log.error("Tool {} failed: {}", toolName, e.getMessage(), e);
             if (threadId != null) {

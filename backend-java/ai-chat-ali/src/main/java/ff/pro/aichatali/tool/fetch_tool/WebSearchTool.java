@@ -39,6 +39,7 @@ public class WebSearchTool implements BiFunction<WebSearchTool.Input, ToolContex
     @Override
     public ToolResult apply(Input input, ToolContext toolContext) {
         try {
+            log.debug("WebSearchTool called: {}", input.query());
             List<Document> results = webSearchPort.search(input.query(), DEFAULT_TOP_K);
             if (results.isEmpty()) {
                 return ToolResult.ok("联网搜索未找到相关内容");
@@ -50,6 +51,8 @@ public class WebSearchTool implements BiFunction<WebSearchTool.Input, ToolContex
                         return StringUtils.isNotBlank(url) ? text + "\n来源: " + url : text;
                     })
                     .collect(Collectors.joining("\n\n---\n\n"));
+            log.debug("WebSearchTool result: {}",
+                    content != null ? content.substring(0, Math.min(content.length(), 20)) : "null");
             return ToolResult.ok(content);
         } catch (Exception e) {
             log.error("WebSearchTool error: {}", e.getMessage(), e);

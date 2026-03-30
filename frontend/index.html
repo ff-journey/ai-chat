@@ -228,7 +228,7 @@
                     </template>
 
                     <!-- Bot: thinking state -->
-                    <template v-else-if="msg.isThinking && !msg.text">
+                    <template v-else-if="msg.isThinking && !msg.text && !(msg.progressSteps && msg.progressSteps.length)">
                         <div class="message-content thinking-content">
                             <div class="thinking-header">
                                 <div class="thinking-dots">
@@ -252,7 +252,7 @@
                         </div>
                     </template>
 
-                    <!-- Bot: response text -->
+                    <!-- Bot: response text (or exec-card arrived while still thinking) -->
                     <template v-else-if="!msg.isUser">
                         <!-- Execution timeline (collapsible card) -->
                         <div v-if="msg.progressSteps && msg.progressSteps.length" class="exec-card">

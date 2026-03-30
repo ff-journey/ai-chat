@@ -277,7 +277,7 @@ createApp({
             this.$nextTick(() => { this.resetTextareaHeight(); this.scrollToBottom(true); });
 
             // Add thinking bubble
-            const botMsg = { isUser: false, text: '', isThinking: true, toolEvents: [], ragTrace: null, ragSteps: [], progressSteps: [], progressCollapsed: false, progressDone: false, progressSummary: '', progressExtra: '' };
+            const botMsg = { isUser: false, text: '', isThinking: true, toolEvents: [], ragTrace: null, ragSteps: [], progressSteps: [], progressCollapsed: true, progressDone: false, progressSummary: '', progressExtra: '' };
             this.messages.push(botMsg);
             const botIdx = this.messages.length - 1;
             this.pendingBotIdx = botIdx;
@@ -390,6 +390,10 @@ createApp({
                             if (ev.parentSpanId && this.spanMap[ev.parentSpanId]) {
                                 this.spanMap[ev.parentSpanId].thinkingText += ev.text;
                             } else {
+                                // First final-reply token → force collapse trace card
+                                if (!this.messages[botIdx].text) {
+                                    this.messages[botIdx].progressCollapsed = true;
+                                }
                                 this.messages[botIdx].isThinking = false;
                                 this.messages[botIdx].text += ev.text;
                             }
@@ -606,6 +610,10 @@ createApp({
                     // Top-level (parent is supervisor — not in spanMap)
                     msg.progressSteps.push(step);
                 }
+                // Auto-expand when first step arrives so user sees the trace live
+                if (!msg.progressDone) {
+                    msg.progressCollapsed = false;
+                }
                 this.startStepTimer(step);
 
             } else if (ev.type === 'span_end') {
@@ -617,7 +625,7 @@ createApp({
                     const totalTime = msg.progressSteps.reduce((sum, s) => sum + parseFloat(s.elapsed || 0), 0).toFixed(1);
                     msg.progressSummary = `${msg.progressSteps.length} 个步骤 · ${totalTime}s`;
                     msg.progressExtra = `used ${totalSteps} tools`;
-                    setTimeout(() => { msg.progressCollapsed = true; }, 800);
+                    msg.progressCollapsed = true;
                     return;
                 }
                 // LLM span_end — silently ignore, do NOT treat as supervisor end
