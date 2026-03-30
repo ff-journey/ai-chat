@@ -254,66 +254,116 @@
 
                     <!-- Bot: response text -->
                     <template v-else-if="!msg.isUser">
-                        <!-- Execution timeline (Cursor-style tree) -->
-                        <div v-if="msg.progressSteps && msg.progressSteps.length" class="exec-timeline">
-                            <div v-for="(step, si) in msg.progressSteps" :key="si" class="tl-node">
-                                <div class="tl-connector">
-                                    <span class="tl-branch">{{ si === msg.progressSteps.length - 1 ? '└─' : '├─' }}</span>
-                                </div>
-                                <div class="tl-content">
-                                    <!-- Header: icon + name + timer (always visible) -->
-                                    <div class="tl-header" @click.stop="step.expanded = !step.expanded">
-                                        <span class="tl-icon-wrap">
-                                            <i :class="['fas', step.icon || 'fa-wrench']"></i>
-                                            <i v-if="step.done && !step.error" class="fas fa-check tl-done-badge"></i>
-                                            <i v-if="step.error" class="fas fa-times tl-error-badge"></i>
-                                            <span v-if="!step.done && !step.error" class="tl-spinner"></span>
-                                        </span>
-                                        <span class="tl-label">{{ step.displayName || step.name }}</span>
-                                        <span class="tl-timer" :class="{active: !step.done}">{{ step.elapsed }}s</span>
-                                        <i v-if="step.inputPreview || step.outputPreview"
-                                           class="fas fa-chevron-right tl-chevron" :class="{rotated: step.expanded}"></i>
+                        <!-- Execution timeline (collapsible card) -->
+                        <div v-if="msg.progressSteps && msg.progressSteps.length" class="exec-card">
+                            <div class="exec-card-header" @click="msg.progressCollapsed = !msg.progressCollapsed">
+                                <i class="fas fa-project-diagram exec-header-icon"></i>
+                                <span v-if="msg.progressCollapsed" class="exec-summary">
+                                    {{ execSummaryText(msg) }}
+                                    <span v-if="execExtraText(msg)" class="exec-extra">{{ execExtraText(msg) }}</span>
+                                </span>
+                                <span v-else class="exec-title">执行过程</span>
+                                <span v-if="!msg.progressCollapsed && currentStepName(msg)" class="exec-current-step">
+                                    {{ currentStepName(msg) }}
+                                </span>
+                                <i class="fas fa-chevron-down exec-collapse-icon" :class="{rotated: !msg.progressCollapsed}"></i>
+                            </div>
+                            <div v-show="!msg.progressCollapsed" class="exec-timeline">
+                                <div v-for="(step, si) in msg.progressSteps" :key="si" class="tl-node">
+                                    <div class="tl-connector">
+                                        <span class="tl-branch">{{ si === msg.progressSteps.length - 1 ? '└─' : '├─' }}</span>
                                     </div>
-
-                                    <!-- Detail panel (click to expand) -->
-                                    <div v-if="step.expanded && (step.inputPreview || (step.done && step.outputPreview))" class="tl-details">
-                                        <div v-if="step.inputPreview" class="tl-detail-row">
-                                            <span class="tl-detail-label"><i class="fas fa-arrow-right"></i> 输入</span>
-                                            <pre class="tl-detail-content">{{ step.inputPreview }}</pre>
+                                    <div class="tl-content">
+                                        <!-- Header: icon + name + timer -->
+                                        <div class="tl-header" @click.stop="step.expanded = !step.expanded">
+                                            <span class="tl-icon-wrap">
+                                                <i :class="['fas', step.icon || 'fa-wrench']"></i>
+                                                <i v-if="step.done && !step.error" class="fas fa-check tl-done-badge"></i>
+                                                <i v-if="step.error" class="fas fa-times tl-error-badge"></i>
+                                                <span v-if="!step.done && !step.error" class="tl-spinner"></span>
+                                            </span>
+                                            <span class="tl-label">{{ step.displayName || step.name }}</span>
+                                            <span class="tl-timer" :class="timerClass(step)">{{ step.elapsed }}s</span>
+                                            <i v-if="step.inputPreview || step.outputPreview || step.thinkingText"
+                                               class="fas fa-chevron-right tl-chevron" :class="{rotated: step.expanded}"></i>
                                         </div>
-                                        <div v-if="step.done && step.outputPreview" class="tl-detail-row">
-                                            <span class="tl-detail-label"><i class="fas fa-arrow-left"></i> 结果</span>
-                                            <pre class="tl-detail-content tl-output">{{ step.outputPreview }}</pre>
-                                        </div>
-                                    </div>
 
-                                    <!-- Sub-steps (always visible, not gated by expanded) -->
-                                    <div v-if="step.subSteps && step.subSteps.length" class="tl-subtree">
-                                        <div v-for="(sub, ssi) in step.subSteps" :key="ssi" class="tl-node tl-sub">
-                                            <div class="tl-connector">
-                                                <span class="tl-branch">{{ ssi === step.subSteps.length - 1 ? '└─' : '├─' }}</span>
+                                        <!-- Thinking text (LLM tokens) -->
+                                        <div v-if="step.thinkingText" class="tl-thinking">
+                                            <div class="tl-thinking-toggle" @click.stop="step.thinkingExpanded = !step.thinkingExpanded">
+                                                <i class="fas fa-brain tl-thinking-icon"></i>
+                                                <span v-if="!step.thinkingExpanded" class="tl-thinking-preview">
+                                                    {{ step.thinkingText.slice(0, 50) }}{{ step.thinkingText.length > 50 ? '...' : '' }}
+                                                </span>
+                                                <span v-else class="tl-thinking-label">思考过程</span>
+                                                <i class="fas fa-chevron-down tl-thinking-chevron" :class="{rotated: step.thinkingExpanded}"></i>
                                             </div>
-                                            <div class="tl-content">
-                                                <div class="tl-header" @click.stop="sub.expanded = !sub.expanded">
-                                                    <span class="tl-icon-wrap">
-                                                        <i :class="['fas', sub.icon || 'fa-wrench']"></i>
-                                                        <i v-if="sub.done && !sub.error" class="fas fa-check tl-done-badge"></i>
-                                                        <i v-if="sub.error" class="fas fa-times tl-error-badge"></i>
-                                                        <span v-if="!sub.done && !sub.error" class="tl-spinner"></span>
-                                                    </span>
-                                                    <span class="tl-label">{{ sub.displayName || sub.name }}</span>
-                                                    <span class="tl-timer" :class="{active: !sub.done}">{{ sub.elapsed }}s</span>
-                                                    <i v-if="sub.inputPreview || sub.outputPreview"
-                                                       class="fas fa-chevron-right tl-chevron" :class="{rotated: sub.expanded}"></i>
+                                            <div v-if="step.thinkingExpanded" class="tl-thinking-body">
+                                                <pre class="tl-thinking-content">{{ step.thinkingText }}<span class="tl-cursor" v-if="!step.done">|</span></pre>
+                                            </div>
+                                        </div>
+
+                                        <!-- Detail panel -->
+                                        <div v-if="step.expanded && (step.inputPreview || (step.done && step.outputPreview))" class="tl-details">
+                                            <div v-if="step.inputPreview" class="tl-detail-row">
+                                                <span class="tl-detail-label"><i class="fas fa-arrow-right"></i> 输入</span>
+                                                <pre class="tl-detail-content">{{ step.inputPreview }}</pre>
+                                            </div>
+                                            <div v-if="step.done && step.outputPreview" class="tl-detail-row">
+                                                <span class="tl-detail-label"><i class="fas fa-arrow-left"></i> 结果</span>
+                                                <pre class="tl-detail-content tl-output">{{ step.outputPreview }}</pre>
+                                            </div>
+                                        </div>
+
+                                        <!-- Sub-steps -->
+                                        <div v-if="step.subSteps && step.subSteps.length" class="tl-subtree">
+                                            <div v-if="step.subStepsCollapsed" class="tl-substeps-summary"
+                                                 @click.stop="step.subStepsCollapsed = false">
+                                                <i class="fas fa-layer-group"></i>
+                                                {{ step.subSteps.length }} 个子步骤
+                                                <i class="fas fa-chevron-right tl-expand-hint"></i>
+                                            </div>
+                                            <div v-for="(sub, ssi) in step.subSteps" :key="ssi"
+                                                 v-show="!step.subStepsCollapsed" class="tl-node tl-sub">
+                                                <div class="tl-connector">
+                                                    <span class="tl-branch">{{ ssi === step.subSteps.length - 1 ? '└─' : '├─' }}</span>
                                                 </div>
-                                                <div v-if="sub.expanded && (sub.inputPreview || (sub.done && sub.outputPreview))" class="tl-details">
-                                                    <div v-if="sub.inputPreview" class="tl-detail-row">
-                                                        <span class="tl-detail-label"><i class="fas fa-arrow-right"></i> 输入</span>
-                                                        <pre class="tl-detail-content">{{ sub.inputPreview }}</pre>
+                                                <div class="tl-content">
+                                                    <div class="tl-header" @click.stop="sub.expanded = !sub.expanded">
+                                                        <span class="tl-icon-wrap">
+                                                            <i :class="['fas', sub.icon || 'fa-wrench']"></i>
+                                                            <i v-if="sub.done && !sub.error" class="fas fa-check tl-done-badge"></i>
+                                                            <i v-if="sub.error" class="fas fa-times tl-error-badge"></i>
+                                                            <span v-if="!sub.done && !sub.error" class="tl-spinner"></span>
+                                                        </span>
+                                                        <span class="tl-label">{{ sub.displayName || sub.name }}</span>
+                                                        <span class="tl-timer" :class="timerClass(sub)">{{ sub.elapsed }}s</span>
+                                                        <i v-if="sub.inputPreview || sub.outputPreview || sub.thinkingText"
+                                                           class="fas fa-chevron-right tl-chevron" :class="{rotated: sub.expanded}"></i>
                                                     </div>
-                                                    <div v-if="sub.done && sub.outputPreview" class="tl-detail-row">
-                                                        <span class="tl-detail-label"><i class="fas fa-arrow-left"></i> 结果</span>
-                                                        <pre class="tl-detail-content tl-output">{{ sub.outputPreview }}</pre>
+                                                    <!-- Sub-step thinking text -->
+                                                    <div v-if="sub.thinkingText" class="tl-thinking">
+                                                        <div class="tl-thinking-toggle" @click.stop="sub.thinkingExpanded = !sub.thinkingExpanded">
+                                                            <i class="fas fa-brain tl-thinking-icon"></i>
+                                                            <span v-if="!sub.thinkingExpanded" class="tl-thinking-preview">
+                                                                {{ sub.thinkingText.slice(0, 50) }}{{ sub.thinkingText.length > 50 ? '...' : '' }}
+                                                            </span>
+                                                            <span v-else class="tl-thinking-label">思考过程</span>
+                                                            <i class="fas fa-chevron-down tl-thinking-chevron" :class="{rotated: sub.thinkingExpanded}"></i>
+                                                        </div>
+                                                        <div v-if="sub.thinkingExpanded" class="tl-thinking-body">
+                                                            <pre class="tl-thinking-content">{{ sub.thinkingText }}<span class="tl-cursor" v-if="!sub.done">|</span></pre>
+                                                        </div>
+                                                    </div>
+                                                    <div v-if="sub.expanded && (sub.inputPreview || (sub.done && sub.outputPreview))" class="tl-details">
+                                                        <div v-if="sub.inputPreview" class="tl-detail-row">
+                                                            <span class="tl-detail-label"><i class="fas fa-arrow-right"></i> 输入</span>
+                                                            <pre class="tl-detail-content">{{ sub.inputPreview }}</pre>
+                                                        </div>
+                                                        <div v-if="sub.done && sub.outputPreview" class="tl-detail-row">
+                                                            <span class="tl-detail-label"><i class="fas fa-arrow-left"></i> 结果</span>
+                                                            <pre class="tl-detail-content tl-output">{{ sub.outputPreview }}</pre>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>

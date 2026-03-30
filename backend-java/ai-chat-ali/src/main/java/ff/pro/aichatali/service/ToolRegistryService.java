@@ -54,7 +54,7 @@ public class ToolRegistryService {
                 })
                 .toList();
         tools = List.copyOf(toolCallbacks);
-        log.info("Support tools: {}", supportTools);
+        log.info("Support tools: {}", toolMap.keySet());
     }
 
     public List<ToolCallback> dynamicCallbacks(int toolFlag) {

@@ -144,7 +144,6 @@ public class AgentConfig {
             @Qualifier("summarizationHook") SummarizationHook summarizationHook,
             DynamicToolPromptInterceptor dynamicToolPromptInterceptor,
             ToolCallCapture toolCallCapture,
-//            ToolMonitoringInterceptor toolMonitoringInterceptor,
             LoggingModelInterceptor loggingModelInterceptor
     ) {
 

@@ -5,9 +5,12 @@ import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
 
+import ff.pro.aichatali.common.SpanContext;
 import ff.pro.aichatali.common.SysContext;
 import ff.pro.aichatali.config.LoggingModelInterceptor;
+import ff.pro.aichatali.config.SseService;
 import ff.pro.aichatali.config.ToolCallCapture;
+import ff.pro.aichatali.config.TraceEvent;
 import ff.pro.aichatali.service.MilvusHybridRetrieverService;
 import ff.pro.aichatali.tool.fetch_tool.WebSearchTool;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +22,7 @@ import org.springframework.ai.tool.function.FunctionToolCallback;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.BiFunction;
 
 @Slf4j
@@ -34,13 +38,16 @@ public class RagAgentTool implements BiFunction<MilvusHybridRetrieverService.Inp
             """;
 
     private final ReactAgent reactAgent;
+    private final SseService sseService;
 
     public RagAgentTool(ChatModel chatModel,
                         RagTool ragTool,
                         WebSearchTool webSearchTool,
                         int maxIterations,
                         ToolCallCapture toolCallCapture,
-                        LoggingModelInterceptor loggingModelInterceptor) {
+                        LoggingModelInterceptor loggingModelInterceptor,
+                        SseService sseService) {
+        this.sseService = sseService;
         ToolCallback docSearch = FunctionToolCallback
                 .builder("ragSearch", ragTool)
                 .description("搜索内部知识库文档")
@@ -68,15 +75,33 @@ public class RagAgentTool implements BiFunction<MilvusHybridRetrieverService.Inp
         String threadId = toolContext != null
                 ? (String) toolContext.getContext().getOrDefault(SysContext.THREAD_ID, null)
                 : null;
+        String parentSpanId = toolContext != null
+                ? (String) toolContext.getContext().getOrDefault(SysContext.CURRENT_SPAN_ID, null)
+                : null;
+
+        // Self-manage agent span
+        SpanContext span = SpanContext.create(SpanContext.SpanType.AGENT, "ragAgentTool", parentSpanId);
+        if (threadId != null) {
+            sseService.push(threadId, TraceEvent.spanStart(span));
+        }
+
         RunnableConfig config = RunnableConfig.builder()
                 .addMetadata(SysContext.THREAD_ID, threadId)
+                .addMetadata(SysContext.CURRENT_SPAN_ID, span.spanId())
                 .addMetadata(SysContext.PARENT_NODE, "ragAgentTool")
+                .addMetadata(SysContext.TOOL_FLAG, Objects.requireNonNull(toolContext).getContext().getOrDefault(SysContext.TOOL_FLAG, null))
                 .build();
         try {
             AssistantMessage response = reactAgent.call(Map.of("input", query), config);
+            if (threadId != null) {
+                sseService.push(threadId, TraceEvent.spanEnd(span, "ok", null));
+            }
             return response.getText();
         } catch (Exception e) {
             log.error("RagAgentTool failed: {}", e.getMessage(), e);
+            if (threadId != null) {
+                sseService.push(threadId, TraceEvent.spanEnd(span, "error", e.getMessage()));
+            }
             return "知识库检索失败: " + e.getMessage();
         }
     }

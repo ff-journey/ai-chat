@@ -48,6 +48,7 @@ public class MilvusHybridRetrieverService {
     public ToolResult retrieve(Input query) {
         try {
         List<Document> reranked = hybridSearchAndRerank(query.query(), 0.3f);
+        log.debug("hybridSearch 搜索 rerank {} 条结果", reranked.size());
         if (reranked.size() < 3) {
             log.info("query rewrite <------------->");
             String stepBackQuery = queryRewriter.stepBack(query.query());
@@ -73,7 +74,6 @@ public class MilvusHybridRetrieverService {
                 .vectors(List.of(new FloatVec(denseVec)))
                 .topK(SEARCH_TOP_K)
                 .build();
-
         // 稀疏向量路 — 直接传文本，Milvus BM25 function 自动处理
         AnnSearchReq sparseReq = AnnSearchReq.builder()
                 .vectorFieldName("sparse_embedding")

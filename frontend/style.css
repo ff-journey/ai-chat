@@ -1073,11 +1073,6 @@ textarea {
     animation: fadeInStep 0.3s ease;
 }
 
-@keyframes fadeInStep {
-    from { opacity: 0; transform: translateX(-8px); }
-    to { opacity: 1; transform: translateX(0); }
-}
-
 .rag-step-icon {
     flex-shrink: 0;
     font-size: 0.75rem;
@@ -1377,11 +1372,6 @@ textarea {
     color: #2e5e2e;
 }
 
-@keyframes spin {
-    from { transform: rotate(0deg); }
-    to   { transform: rotate(360deg); }
-}
-
 /* ── Sample Picker Modal ────────────────────────────────────────────────────── */
 .modal-overlay {
     position: fixed;
@@ -1513,9 +1503,107 @@ textarea {
     font-weight: 600;
 }
 
-/* ── Cursor-style execution timeline ───────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════════
+   Agent Execution Visualization — Kawaii Theme
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Exec card (collapsible wrapper) ─────────────────────────────────────── */
+.exec-card {
+    border: 1.5px solid rgba(255, 183, 178, 0.35);
+    border-radius: 16px;
+    background: linear-gradient(135deg, #fff8f7 0%, #fdf5ff 50%, #f5f8ff 100%);
+    margin-bottom: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 12px rgba(255, 158, 153, 0.1);
+    transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.exec-card:hover {
+    box-shadow: 0 4px 20px rgba(255, 158, 153, 0.18);
+}
+
+.exec-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.2s ease;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-color);
+    font-family: 'Nunito', 'Microsoft YaHei', sans-serif;
+}
+
+.exec-card-header:hover {
+    background: rgba(255, 183, 178, 0.08);
+}
+
+.exec-header-icon {
+    font-size: 0.82rem;
+    color: var(--primary-color);
+    flex-shrink: 0;
+}
+
+.exec-summary {
+    color: var(--text-light);
+    font-weight: 500;
+    flex: 1;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.exec-extra {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--primary-color);
+    background: linear-gradient(135deg, rgba(255,183,178,0.12), rgba(255,218,193,0.18));
+    padding: 1px 8px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,183,178,0.25);
+    white-space: nowrap;
+}
+
+.exec-title {
+    color: var(--text-color);
+    flex: 1;
+}
+
+.exec-current-step {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--primary-color);
+    background: linear-gradient(135deg, rgba(255,183,178,0.15), rgba(255,218,193,0.2));
+    padding: 2px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,183,178,0.3);
+    animation: stepPulse 2s ease-in-out infinite;
+    white-space: nowrap;
+}
+
+.exec-collapse-icon {
+    font-size: 0.58rem;
+    color: var(--primary-light);
+    transition: transform 0.25s ease;
+    flex-shrink: 0;
+}
+
+.exec-collapse-icon.rotated {
+    transform: rotate(180deg);
+}
+
+.exec-card .exec-timeline {
+    margin-bottom: 0;
+    padding: 6px 10px 10px;
+    border-top: 1px solid rgba(255,183,178,0.2);
+    background: rgba(255,255,255,0.4);
+}
+
+/* ── Execution timeline (tree) ───────────────────────────────────────────── */
 .exec-timeline {
-    font-family: 'SFMono-Regular', Consolas, 'Courier New', monospace;
     font-size: 0.82rem;
     margin-bottom: 10px;
     max-width: 100%;
@@ -1523,20 +1611,24 @@ textarea {
 
 .tl-node {
     display: flex;
-    animation: fadeInStep 0.3s ease;
+    animation: fadeInStep 0.35s ease-out;
 }
 
 .tl-connector {
-    color: #bbb;
     flex-shrink: 0;
     line-height: 1.8;
     user-select: none;
-    font-size: 0.78rem;
-    width: 24px;
+    font-size: 0.72rem;
+    width: 22px;
+    display: flex;
+    align-items: flex-start;
+    padding-top: 2px;
 }
 
 .tl-branch {
-    color: #ccc;
+    color: var(--primary-light);
+    opacity: 0.6;
+    font-family: 'SFMono-Regular', Consolas, monospace;
 }
 
 .tl-content {
@@ -1547,81 +1639,92 @@ textarea {
 .tl-header {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 2px 6px;
+    gap: 7px;
+    padding: 4px 8px;
     cursor: pointer;
-    border-radius: 4px;
-    transition: background 0.15s;
+    border-radius: 10px;
+    transition: background 0.2s ease, box-shadow 0.2s ease;
     line-height: 1.8;
 }
 
 .tl-header:hover {
-    background: rgba(100, 80, 200, 0.05);
+    background: rgba(255, 183, 178, 0.1);
+    box-shadow: 0 1px 4px rgba(255, 158, 153, 0.08);
 }
 
 /* Icon wrapper with badge overlay */
 .tl-icon-wrap {
     position: relative;
-    width: 18px;
-    height: 18px;
+    width: 26px;
+    height: 26px;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    background: linear-gradient(135deg, #fff0ef, #f5eeff);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 183, 178, 0.25);
 }
 
 .tl-icon-wrap > i:first-child {
-    font-size: 0.78rem;
-    color: #b87a1c;
+    font-size: 0.72rem;
+    color: var(--primary-color);
+    transition: color 0.3s ease;
 }
 
 .tl-done-badge {
     position: absolute;
-    bottom: -2px;
-    right: -4px;
-    font-size: 0.42rem;
+    bottom: -3px;
+    right: -3px;
+    font-size: 0.38rem;
     color: #fff;
-    background: #4caf50;
+    background: linear-gradient(135deg, #66bb6a, #43a047);
     border-radius: 50%;
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
     line-height: 1;
+    box-shadow: 0 1px 4px rgba(76, 175, 80, 0.4);
+    animation: badgePop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: all 0.3s ease;
 }
 
 .tl-error-badge {
     position: absolute;
-    bottom: -2px;
-    right: -4px;
-    font-size: 0.42rem;
+    bottom: -3px;
+    right: -3px;
+    font-size: 0.38rem;
     color: #fff;
-    background: #f44336;
+    background: linear-gradient(135deg, #ef5350, #e53935);
     border-radius: 50%;
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
     line-height: 1;
+    box-shadow: 0 1px 4px rgba(244, 67, 54, 0.4);
+    animation: badgePop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: all 0.3s ease;
 }
 
 .tl-spinner {
     position: absolute;
-    bottom: -2px;
-    right: -4px;
-    width: 8px;
-    height: 8px;
-    border: 1.5px solid #b87a1c;
+    bottom: -3px;
+    right: -3px;
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid var(--primary-color);
     border-top-color: transparent;
     border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    animation: spin 0.7s linear infinite;
 }
 
 .tl-label {
     font-weight: 600;
-    color: #555;
+    color: var(--text-color);
     flex: 1;
     min-width: 0;
     overflow: hidden;
@@ -1633,31 +1736,46 @@ textarea {
 
 .tl-node.tl-sub .tl-label {
     font-size: 0.79rem;
+    color: #888;
 }
 
 .tl-timer {
-    font-size: 0.72rem;
-    color: #999;
+    font-size: 0.7rem;
+    color: var(--text-light);
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
-    min-width: 36px;
+    min-width: 38px;
     text-align: right;
+    font-weight: 500;
+    background: rgba(0,0,0,0.03);
+    padding: 1px 6px;
+    border-radius: 8px;
+    transition: color 0.3s, background 0.3s;
 }
 
 .tl-timer.active {
-    color: #b87a1c;
-    animation: blink 1.2s ease-in-out infinite;
+    color: var(--primary-color);
+    background: rgba(255, 158, 153, 0.12);
+    font-weight: 700;
+    animation: timerPulse 1.5s ease-in-out infinite;
 }
 
-@keyframes blink {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.3; }
+.tl-timer-warn {
+    color: #e67e22 !important;
+    font-weight: 700;
+    background: rgba(230, 126, 34, 0.1) !important;
+}
+
+.tl-timer-slow {
+    color: #e74c3c !important;
+    font-weight: 700;
+    background: rgba(231, 76, 60, 0.1) !important;
 }
 
 .tl-chevron {
-    font-size: 0.55rem;
-    color: #bbb;
-    transition: transform 0.2s;
+    font-size: 0.5rem;
+    color: var(--primary-light);
+    transition: transform 0.25s ease;
     flex-shrink: 0;
 }
 
@@ -1667,26 +1785,29 @@ textarea {
 
 /* Detail panel (expandable) */
 .tl-details {
-    padding: 4px 0 4px 24px;
+    padding: 6px 0 6px 34px;
     display: flex;
     flex-direction: column;
     gap: 6px;
+    animation: fadeInStep 0.25s ease-out;
 }
 
 .tl-detail-row {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
 }
 
 .tl-detail-label {
     font-size: 0.7rem;
-    font-weight: 600;
-    color: #7c5cbf;
+    font-weight: 700;
+    color: var(--primary-color);
     display: flex;
     align-items: center;
     gap: 4px;
     font-family: 'Nunito', 'Microsoft YaHei', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
 }
 
 .tl-detail-content {
@@ -1695,28 +1816,204 @@ textarea {
     font-size: 0.73rem;
     white-space: pre-wrap;
     word-break: break-all;
-    background: #fff;
-    border: 1px solid #e0ddf5;
-    border-radius: 5px;
-    padding: 5px 8px;
+    background: rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(255, 183, 178, 0.25);
+    border-radius: 10px;
+    padding: 8px 10px;
     max-height: 150px;
     overflow-y: auto;
-    color: #333;
+    color: #555;
     line-height: 1.5;
+    backdrop-filter: blur(4px);
 }
 
 .tl-output {
-    border-color: #c8e6c9;
-    background: #f9fdf9;
-    color: #2e5e2e;
+    border-color: rgba(102, 187, 106, 0.3);
+    background: rgba(232, 245, 233, 0.6);
+    color: #2e7d32;
 }
 
-/* Sub-step tree (always visible, not gated by parent expanded) */
+/* Sub-step tree */
 .tl-subtree {
-    padding-left: 16px;
+    padding-left: 18px;
+    margin-left: 12px;
+    border-left: 2px solid rgba(255, 183, 178, 0.2);
 }
+
+.tl-substeps-summary {
+    font-size: 0.72rem;
+    color: var(--text-light);
+    padding: 3px 10px;
+    margin: 2px 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 6px;
+    transition: background 0.2s, color 0.2s;
+}
+
+.tl-substeps-summary:hover {
+    background: rgba(255, 183, 178, 0.1);
+    color: var(--primary-color);
+}
+
+.tl-substeps-summary .fa-layer-group {
+    font-size: 0.65rem;
+    opacity: 0.6;
+}
+
+.tl-expand-hint {
+    font-size: 0.55rem;
+    opacity: 0.4;
+    margin-left: auto;
+}
+
+/* ── Pulse animation for running step icons ──────────────────────────────── */
+.tl-node:not(.tl-done) .tl-icon-wrap > i:first-child {
+    animation: iconGlow 1.8s ease-in-out infinite;
+}
+
+/* ── LLM thinking text area ──────────────────────────────────────────────── */
+.tl-thinking {
+    padding: 4px 0 4px 34px;
+    animation: fadeInStep 0.25s ease-out;
+}
+
+.tl-thinking-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    cursor: pointer;
+    border-radius: 10px;
+    font-size: 0.76rem;
+    transition: background 0.2s ease;
+}
+
+.tl-thinking-toggle:hover {
+    background: rgba(155, 89, 182, 0.08);
+}
+
+.tl-thinking-icon {
+    font-size: 0.68rem;
+    color: #b380d4;
+    flex-shrink: 0;
+    animation: brainPulse 2s ease-in-out infinite;
+}
+
+.tl-thinking-preview {
+    color: #b0a0b8;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: 'Nunito', 'Microsoft YaHei', sans-serif;
+    font-style: italic;
+    font-size: 0.74rem;
+}
+
+.tl-thinking-label {
+    color: #9b6cb8;
+    font-weight: 700;
+    flex: 1;
+    font-family: 'Nunito', 'Microsoft YaHei', sans-serif;
+    font-size: 0.76rem;
+}
+
+.tl-thinking-chevron {
+    font-size: 0.48rem;
+    color: #c8a8d8;
+    transition: transform 0.25s ease;
+    flex-shrink: 0;
+}
+
+.tl-thinking-chevron.rotated {
+    transform: rotate(180deg);
+}
+
+.tl-thinking-body {
+    padding: 4px 0 2px 8px;
+    animation: fadeIn 0.25s ease-out;
+}
+
+.tl-thinking-content {
+    margin: 0;
+    font-family: 'Nunito', 'Microsoft YaHei', sans-serif;
+    font-size: 0.76rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+    background: linear-gradient(135deg, #faf5ff, #f3eeff);
+    border: 1px solid rgba(155, 89, 182, 0.15);
+    border-radius: 12px;
+    padding: 10px 12px;
+    max-height: 200px;
+    overflow-y: auto;
+    color: #6d5a7a;
+    line-height: 1.65;
+    box-shadow: inset 0 1px 3px rgba(155, 89, 182, 0.06);
+}
+
+/* ── Blinking cursor for streaming text ──────────────────────────────────── */
+.tl-cursor {
+    animation: cursorBlink 0.8s step-end infinite;
+    color: #b380d4;
+    font-weight: 700;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Animations
+   ══════════════════════════════════════════════════════════════════════════════ */
 
 @keyframes fadeInStep {
-    from { opacity: 0; transform: translateX(-6px); }
-    to   { opacity: 1; transform: translateX(0); }
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+}
+
+@keyframes timerPulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.4; }
+}
+
+@keyframes stepPulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(255, 158, 153, 0); }
+    50%      { opacity: 0.85; box-shadow: 0 0 0 3px rgba(255, 158, 153, 0.15); }
+}
+
+@keyframes iconGlow {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.6; transform: scale(0.92); }
+}
+
+@keyframes brainPulse {
+    0%, 100% { opacity: 0.8; }
+    50%      { opacity: 0.4; }
+}
+
+@keyframes badgePop {
+    0%   { transform: scale(0); }
+    60%  { transform: scale(1.2); }
+    100% { transform: scale(1); }
+}
+
+@keyframes cursorBlink {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0; }
+}
+
+/* keep legacy name referenced in JS */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.3; }
 }

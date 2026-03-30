@@ -4,6 +4,7 @@ import com.alibaba.cloud.ai.graph.agent.interceptor.ModelCallHandler;
 import com.alibaba.cloud.ai.graph.agent.interceptor.ModelInterceptor;
 import com.alibaba.cloud.ai.graph.agent.interceptor.ModelRequest;
 import com.alibaba.cloud.ai.graph.agent.interceptor.ModelResponse;
+import ff.pro.aichatali.common.SpanContext;
 import ff.pro.aichatali.common.SysContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,12 +30,16 @@ public class LoggingModelInterceptor extends ModelInterceptor {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public ModelResponse interceptModel(ModelRequest request, ModelCallHandler handler) {
         long startTime = System.currentTimeMillis();
 
         String threadId = (String) request.getContext().get(SysContext.THREAD_ID);
+        String parentSpanId = (String) request.getContext().get(SysContext.CURRENT_SPAN_ID);
         String parentNode = (String) request.getContext().get(SysContext.PARENT_NODE);
-        String agentName = parentNode != null ? "ragAgent" : "supervisorAgent";
+        String agentName = parentNode != null ? parentNode : "supervisor";
+
+        SpanContext span = SpanContext.create(SpanContext.SpanType.LLM, agentName + "_llm", parentSpanId);
 
         Message last = request.getMessages().getLast();
         String inputPreview = last.getText();
@@ -44,7 +49,7 @@ public class LoggingModelInterceptor extends ModelInterceptor {
         log.info("=== LLM Call Start [{}] Last Input: {}", agentName, inputPreview);
 
         if (threadId != null) {
-            sseService.push(threadId, AgentEvent.thinking(agentName, inputPreview, parentNode));
+            sseService.push(threadId, TraceEvent.spanStart(span));
         }
 
         // Filter out empty AssistantMessages that cause DeepSeek-V3 / SiliconFlow HTTP 400
@@ -70,27 +75,29 @@ public class LoggingModelInterceptor extends ModelInterceptor {
         if (response.getMessage() instanceof Flux) {
             AtomicReference<StringBuilder> buffer = new AtomicReference<>(new StringBuilder());
             Flux<ChatResponse> flux = (Flux<ChatResponse>) response.getMessage();
+            boolean isSupervisor = "supervisor".equals(agentName);
             Flux<ChatResponse> wrapped = flux.doOnNext(chunk -> {
                 if (chunk.getResult() != null && chunk.getResult().getOutput() != null) {
                     String text = chunk.getResult().getOutput().getText();
-                    if (text != null) buffer.get().append(text);
+                    if (text != null) {
+                        buffer.get().append(text);
+                        if (!isSupervisor && threadId != null && !text.isEmpty()) {
+                            sseService.push(threadId, TraceEvent.token(text, parentSpanId));
+                        }
+                    }
                 }
             }).doOnComplete(() -> {
-                String out = buffer.get().toString();
                 log.info("=== LLM Call End [{}] ({}ms)", agentName, System.currentTimeMillis() - startTime);
                 if (threadId != null) {
-                    String outPreview = out.length() > 200 ? out.substring(0, 200) + "..." : out;
-                    sseService.push(threadId, AgentEvent.stepEnd(agentName, outPreview, parentNode));
+                    sseService.push(threadId, TraceEvent.spanEnd(span, "ok", null));
                 }
             });
             return ModelResponse.of(wrapped);
         } else {
             AssistantMessage msg = (AssistantMessage) response.getMessage();
-            String out = msg.getText();
             log.info("=== LLM Call End [{}] ({}ms)", agentName, System.currentTimeMillis() - startTime);
             if (threadId != null) {
-                String outPreview = out != null && out.length() > 200 ? out.substring(0, 200) + "..." : out;
-                sseService.push(threadId, AgentEvent.stepEnd(agentName, outPreview, parentNode));
+                sseService.push(threadId, TraceEvent.spanEnd(span, "ok", null));
             }
             return response;
         }

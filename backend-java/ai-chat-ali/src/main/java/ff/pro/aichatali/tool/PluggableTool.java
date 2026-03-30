@@ -24,4 +24,6 @@ public interface PluggableTool {
 
     default List<String> getMutuallyExclusiveWith() { return List.of(); }
 
+    /** True if this tool wraps a sub-agent (ToolCallCapture skips span emission for agent tools). */
+    default boolean isAgent() { return false; }
 }

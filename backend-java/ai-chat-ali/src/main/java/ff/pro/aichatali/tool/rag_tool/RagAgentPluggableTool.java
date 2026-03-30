@@ -1,6 +1,7 @@
 package ff.pro.aichatali.tool.rag_tool;
 
 import ff.pro.aichatali.config.LoggingModelInterceptor;
+import ff.pro.aichatali.config.SseService;
 import ff.pro.aichatali.config.ToolCallCapture;
 import ff.pro.aichatali.service.MilvusHybridRetrieverService;
 import ff.pro.aichatali.tool.fetch_tool.WebSearchTool;
@@ -34,6 +35,8 @@ public class RagAgentPluggableTool implements PluggableTool {
     private ToolCallCapture toolCallCapture;
     @Autowired
     private LoggingModelInterceptor loggingModelInterceptor;
+    @Autowired
+    private SseService sseService;
 
     @Value("${tools.rag-agent.max-iterations:5}")
     private int maxIterations;
@@ -47,10 +50,13 @@ public class RagAgentPluggableTool implements PluggableTool {
     public List<String> getMutuallyExclusiveWith() { return List.of("ragTool", "webSearchTool"); }
 
     @Override
+    public boolean isAgent() { return true; }
+
+    @Override
     public ToolCallback getToolCallback() {
         return FunctionToolCallback.builder(this.getName(),
                         new RagAgentTool(chatModel, ragTool, webSearchTool, maxIterations,
-                                toolCallCapture, loggingModelInterceptor))
+                                toolCallCapture, loggingModelInterceptor, sseService))
                 .description(getDescription())
                 .inputType(MilvusHybridRetrieverService.Input.class)
                 .build();

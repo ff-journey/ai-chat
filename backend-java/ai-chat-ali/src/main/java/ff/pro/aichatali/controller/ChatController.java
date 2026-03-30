@@ -8,8 +8,9 @@ import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import ff.pro.aichatali.common.RequestContext;
 import ff.pro.aichatali.common.SysContext;
-import ff.pro.aichatali.config.AgentEvent;
+import ff.pro.aichatali.common.SpanContext;
 import ff.pro.aichatali.config.SseService;
+import ff.pro.aichatali.config.TraceEvent;
 import ff.pro.aichatali.service.ChatHistoryService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -122,8 +123,13 @@ public class ChatController {
         if (imagePath != null) cfgBuilder.addMetadata("uploaded_image_path", imagePath);
         cfgBuilder.addMetadata(SysContext.TOOL_FLAG, RequestContext.getRequestContext().getToolFlag());
         cfgBuilder.addMetadata(SysContext.THREAD_ID, threadId);
+
+        SpanContext rootSpan = SpanContext.create(SpanContext.SpanType.SUPERVISOR, "supervisor", null);
+        cfgBuilder.addMetadata(SysContext.CURRENT_SPAN_ID, rootSpan.spanId());
         RunnableConfig config = cfgBuilder.build();
 
+        sseService.createSink(threadId);
+        sseService.push(threadId, TraceEvent.spanStart(rootSpan));
         StringBuilder aiResponse = new StringBuilder();
         try {
             Sinks.Empty<Void> doneSink = Sinks.empty();
@@ -134,9 +140,6 @@ public class ChatController {
                         StreamingOutput<?> so = (StreamingOutput<?>) o;
                         try {
                             String text = so.message() != null ? so.message().getText() : null;
-                            log.debug("StreamingOutput type={}, text='{}'",
-                                      so.getOutputType(),
-                                      text != null ? text.substring(0, Math.min(text.length(), 80)) : "null");
                             if (so.getOutputType() == OutputType.AGENT_MODEL_STREAMING) {
                                 if (text != null && !text.isEmpty()) {
                                     aiResponse.append(text);
@@ -148,16 +151,8 @@ public class ChatController {
                         }
                         return Flux.empty();
                     })
-                    .doFinally(signal -> doneSink.tryEmitEmpty());
-
-            // Send SSE comments every 15s to keep the connection alive during long tool calls
-            Flux<String> keepalive = Flux.interval(Duration.ofSeconds(15))
-                    .map(i -> ": keepalive")
-                    .takeUntilOther(doneSink.asMono());
-
-            return Flux.merge(tokens, keepalive)
                     .doOnComplete(() -> {
-                        sseService.push(threadId, AgentEvent.allDone());
+                        sseService.push(threadId, TraceEvent.spanEnd(rootSpan, "ok", null));
                         if (!aiResponse.isEmpty()) {
                             chatHistoryService.addMessage(threadId, "assistant", aiResponse.toString());
                             if (chatHistoryService.getTitle(threadId) == null) {
@@ -167,15 +162,29 @@ public class ChatController {
                     })
                     .doOnError(e -> {
                         log.error("Stream error for thread {}: {}", threadId, e.getMessage());
-                        sseService.push(threadId, AgentEvent.allDone());
+                        sseService.push(threadId, TraceEvent.spanEnd(rootSpan, "error", e.getMessage()));
                     })
                     .onErrorResume(e -> {
                         String errorJson = jsonEvent("token", Map.<String, Object>of(
                                 "text", "\n\n抱歉，处理过程中出现错误: " + e.getMessage()));
                         return Flux.just(errorJson);
+                    })
+                    .doFinally(signal -> {
+                        sseService.complete(threadId);
+                        doneSink.tryEmitEmpty();
                     });
+
+            Flux<String> eventFlux = sseService.getFlux(threadId);
+
+            // Send SSE comments every 15s to keep the connection alive during long tool calls
+            Flux<String> keepalive = Flux.interval(Duration.ofSeconds(15))
+                    .map(i -> ": keepalive")
+                    .takeUntilOther(doneSink.asMono());
+
+            return Flux.merge(tokens, eventFlux, keepalive);
         } catch (GraphRunnerException e) {
             log.error("Stream error for thread {}: {}", threadId, e.getMessage());
+            sseService.complete(threadId);
             return Flux.error(e);
         }
     }

@@ -1,5 +1,15 @@
 const { createApp } = Vue;
 
+const SPAN_NAMES = {
+    ragAgentTool:         { label: '知识库检索', icon: 'fa-robot' },
+    ragSearch:            { label: '文档检索', icon: 'fa-search' },
+    webSearch:            { label: '联网搜索', icon: 'fa-globe' },
+    webSearchTool:        { label: '联网搜索', icon: 'fa-globe' },
+    ragTool:              { label: '文档检索', icon: 'fa-book' },
+    pneumoniaCnnTool:     { label: 'X光分析', icon: 'fa-lungs' },
+    medicalDiagnosisTool: { label: '医疗诊断', icon: 'fa-stethoscope' },
+};
+
 createApp({
     data() {
         return {
@@ -41,9 +51,11 @@ createApp({
             enabledTools: [],     // names of enabled tools
             showToolPicker: false,
 
-            // ─── observability SSE ─────────────────────────────────
-            obsSource: null,
+            // ─── observability ────────────────────────────────────
             pendingBotIdx: -1,
+            spanMap: {},          // spanId → step object (for tree building)
+            rootSpanId: null,     // supervisor span id (for detecting final span_end)
+            ignoredSpanIds: {},   // LLM span ids (skipped in UI but must not trigger collapse)
             userScrolledUp: false,
 
             // ─── documents ─────────────────────────────────────────
@@ -153,7 +165,6 @@ createApp({
         },
 
         logout() {
-            this.obsSource?.close();
             this.messages.forEach(m => this.stopAllTimers(m.progressSteps));
             this.pendingBotIdx = -1;
             this.token     = null;
@@ -266,11 +277,13 @@ createApp({
             this.$nextTick(() => { this.resetTextareaHeight(); this.scrollToBottom(true); });
 
             // Add thinking bubble
-            const botMsg = { isUser: false, text: '', isThinking: true, toolEvents: [], ragTrace: null, ragSteps: [], progressSteps: [] };
+            const botMsg = { isUser: false, text: '', isThinking: true, toolEvents: [], ragTrace: null, ragSteps: [], progressSteps: [], progressCollapsed: false, progressDone: false, progressSummary: '', progressExtra: '' };
             this.messages.push(botMsg);
             const botIdx = this.messages.length - 1;
             this.pendingBotIdx = botIdx;
-            this.connectObservability();
+            this.spanMap = {};
+            this.rootSpanId = null;
+            this.ignoredSpanIds = {};
 
             this.isLoading = true;
             this.abortController = new AbortController();
@@ -374,11 +387,17 @@ createApp({
                     try {
                         const ev = JSON.parse(raw);
                         if (ev.type === 'token') {
-                            this.messages[botIdx].isThinking = false;
-                            this.messages[botIdx].text += ev.text;
+                            if (ev.parentSpanId && this.spanMap[ev.parentSpanId]) {
+                                this.spanMap[ev.parentSpanId].thinkingText += ev.text;
+                            } else {
+                                this.messages[botIdx].isThinking = false;
+                                this.messages[botIdx].text += ev.text;
+                            }
+                        } else if (ev.type === 'span_start' || ev.type === 'span_end') {
+                            this.handleObsEvent(ev, botIdx);
                         } else if (ev.type === 'error') {
                             this.messages[botIdx].isThinking = false;
-                            this.messages[botIdx].text += `\n[Error: ${ev.message || ev.content}]`;
+                            this.messages[botIdx].text += `\n[Error: ${ev.message || ev.error}]`;
                         }
                     } catch (e) {
                         console.warn('SSE parse error:', e, raw);
@@ -404,7 +423,6 @@ createApp({
 
         // ─── Navigation ─────────────────────────────────────────────
         handleNewChat() {
-            this.obsSource?.close();
             this.messages.forEach(m => this.stopAllTimers(m.progressSteps));
             this.pendingBotIdx  = -1;
             this.messages       = [];
@@ -441,7 +459,6 @@ createApp({
             this.isFirstMessage = false;
             this.showHistorySidebar = false;
             this.activeNav = 'newChat';
-            this.connectObservability();
 
             try {
                 const res = await this.authFetch(`/sessions/${this.userId}/${sid}`);
@@ -525,31 +542,6 @@ createApp({
             return 'fas ' + (t ? t.toolIcon : 'fa-cog');
         },
 
-        // ─── Observability SSE ────────────────────────────────────────
-        connectObservability() {
-            this.obsSource?.close();
-            this._obsRetryCount = 0;
-            const tid = (this.userId && this.userId !== 'default')
-                ? `${this.userId}_${this.sessionId}` : this.sessionId;
-            const connect = () => {
-                const es = new EventSource(`/sse/${tid}`);
-                es.onmessage = e => {
-                    this._obsRetryCount = 0;
-                    try { this.handleObsEvent(JSON.parse(e.data)); }
-                    catch (err) { console.warn('obs parse error', err); }
-                };
-                es.onerror = () => {
-                    es.close();
-                    if (this.pendingBotIdx >= 0 && this._obsRetryCount < 5) {
-                        this._obsRetryCount++;
-                        setTimeout(() => connect(), 1000 * this._obsRetryCount);
-                    }
-                };
-                this.obsSource = es;
-            };
-            connect();
-        },
-
         // ─── Timer management for progress steps ─────────────────────
         startStepTimer(step) {
             step.startTime = Date.now();
@@ -574,86 +566,76 @@ createApp({
             }
         },
 
-        handleObsEvent(ev) {
-            if (this.pendingBotIdx < 0) return;
-            const msg = this.messages[this.pendingBotIdx];
+        handleObsEvent(ev, botIdx) {
+            const msg = this.messages[botIdx];
             if (!msg) return;
 
-            // Skip top-level supervisorAgent thinking/step_end — only show tool calls
-            const isSupervisorMeta = !ev.parentNode &&
-                (ev.type === 'AGENT_THINKING' || ev.type === 'AGENT_STEP_END');
-            if (isSupervisorMeta) return;
-
-            if (ev.type === 'AGENT_THINKING') {
-                const parent = [...msg.progressSteps].reverse()
-                    .find(s => s.name === ev.parentNode && s.type === 'tool');
-                if (parent) {
-                    const sub = {
-                        type: 'thinking', name: ev.agentName || 'Agent',
-                        displayName: ev.agentName || 'Agent',
-                        icon: 'fa-brain',
-                        inputPreview: ev.input || '', outputPreview: '',
-                        done: false, error: false, expanded: false,
-                        parentNode: ev.parentNode, subSteps: [],
-                        startTime: null, elapsed: '0.0', timerId: null
-                    };
-                    parent.subSteps.push(sub);
-                    this.startStepTimer(sub);
+            if (ev.type === 'span_start') {
+                // Track supervisor span id — don't render in tree
+                if (ev.spanType === 'supervisor') {
+                    this.rootSpanId = ev.spanId;
+                    return;
                 }
-            } else if (ev.type === 'TOOL_START') {
-                const toolInfo = this.availableTools.find(t => t.name === ev.toolName);
+                // Track LLM span ids — don't render in tree but must not trigger collapse
+                if (ev.spanType === 'llm') {
+                    this.ignoredSpanIds[ev.spanId] = true;
+                    return;
+                }
+
+                const toolInfo = this.availableTools.find(t => t.name === ev.name);
+                const fallback = SPAN_NAMES[ev.name];
                 const step = {
-                    type: 'tool', name: ev.toolName || '工具',
-                    displayName: toolInfo ? toolInfo.title : (ev.toolName || '工具'),
-                    icon: toolInfo ? toolInfo.toolIcon : 'fa-wrench',
-                    inputPreview: ev.input || '', outputPreview: '',
+                    spanId: ev.spanId,
+                    type: ev.spanType,   // 'agent' or 'tool'
+                    name: ev.name,
+                    displayName: toolInfo ? toolInfo.title : (fallback ? fallback.label : (ev.name || '工具')),
+                    icon: toolInfo ? toolInfo.toolIcon : (fallback ? fallback.icon : (ev.spanType === 'agent' ? 'fa-robot' : 'fa-wrench')),
+                    outputPreview: '',
                     done: false, error: false, expanded: false,
-                    parentNode: ev.parentNode || null, subSteps: [],
+                    thinkingText: '', thinkingExpanded: false,
+                    subSteps: [], subStepsCollapsed: false,
                     startTime: null, elapsed: '0.0', timerId: null
                 };
-                if (!ev.parentNode) {
-                    msg.progressSteps.push(step);
+                this.spanMap[ev.spanId] = step;
+
+                // Find parent: if parentSpanId points to an agent/tool step, nest under it
+                const parentStep = ev.parentSpanId ? this.spanMap[ev.parentSpanId] : null;
+                if (parentStep) {
+                    parentStep.subSteps.push(step);
                 } else {
-                    const parent = [...msg.progressSteps].reverse()
-                        .find(s => s.name === ev.parentNode && s.type === 'tool');
-                    if (parent) parent.subSteps.push(step);
+                    // Top-level (parent is supervisor — not in spanMap)
+                    msg.progressSteps.push(step);
                 }
                 this.startStepTimer(step);
-            } else if (ev.type === 'AGENT_STEP_END') {
-                const parent = [...msg.progressSteps].reverse()
-                    .find(s => s.name === ev.parentNode && s.type === 'tool');
-                if (parent) {
-                    const sub = [...parent.subSteps].reverse()
-                        .find(s => s.type === 'thinking' && !s.done);
-                    if (sub) {
-                        sub.done = true;
-                        sub.outputPreview = ev.output || '';
-                        this.stopStepTimer(sub);
-                    }
+
+            } else if (ev.type === 'span_end') {
+                // Supervisor span_end — final completion, collapse entire card
+                if (ev.spanId === this.rootSpanId) {
+                    this.stopAllTimers(msg.progressSteps);
+                    msg.progressDone = true;
+                    const totalSteps = this.countAllSteps(msg.progressSteps);
+                    const totalTime = msg.progressSteps.reduce((sum, s) => sum + parseFloat(s.elapsed || 0), 0).toFixed(1);
+                    msg.progressSummary = `${msg.progressSteps.length} 个步骤 · ${totalTime}s`;
+                    msg.progressExtra = `used ${totalSteps} tools`;
+                    setTimeout(() => { msg.progressCollapsed = true; }, 800);
+                    return;
                 }
-            } else if (ev.type === 'TOOL_END') {
-                const markDone = (step) => {
+                // LLM span_end — silently ignore, do NOT treat as supervisor end
+                if (this.ignoredSpanIds[ev.spanId]) {
+                    return;
+                }
+                // Agent/tool span_end — mark step done, auto-collapse its subtree
+                const step = this.spanMap[ev.spanId];
+                if (step) {
                     step.done = true;
                     step.outputPreview = ev.output || '';
-                    if (ev.error) step.error = true;
+                    if (ev.status === 'error') step.error = true;
                     this.stopStepTimer(step);
-                };
-                if (!ev.parentNode) {
-                    const step = [...msg.progressSteps].reverse()
-                        .find(s => s.type === 'tool' && s.name === ev.toolName && !s.done);
-                    if (step) markDone(step);
-                } else {
-                    const parent = [...msg.progressSteps].reverse()
-                        .find(s => s.name === ev.parentNode && s.type === 'tool');
-                    if (parent) {
-                        const sub = [...parent.subSteps].reverse()
-                            .find(s => s.type === 'tool' && s.name === ev.toolName && !s.done);
-                        if (sub) markDone(sub);
+                    // Auto-collapse subtree of completed step
+                    if (step.subSteps && step.subSteps.length) {
+                        step.subStepsCollapsed = true;
                     }
                 }
-            } else if (ev.type === 'DONE') {
-                this.stopAllTimers(msg.progressSteps);
-                this.pendingBotIdx = -1;
             }
         },
 
@@ -800,6 +782,63 @@ createApp({
                 if (diff < 7)  return diff + '天前';
                 return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
             } catch { return ''; }
+        },
+
+        timerClass(step) {
+            if (!step.done) return 'active';
+            const t = parseFloat(step.elapsed);
+            if (t > 30) return 'tl-timer-slow';
+            if (t > 10) return 'tl-timer-warn';
+            return '';
+        },
+
+        currentStepName(msg) {
+            const running = this.findRunningStep(msg.progressSteps);
+            return running ? (running.displayName || running.name) : null;
+        },
+
+        findRunningStep(steps) {
+            if (!steps) return null;
+            for (const s of steps) {
+                if (!s.done) {
+                    const sub = this.findRunningStep(s.subSteps);
+                    return sub || s;
+                }
+            }
+            return null;
+        },
+
+        countAllSteps(steps) {
+            if (!steps) return 0;
+            let count = 0;
+            for (const s of steps) {
+                count++;
+                count += this.countAllSteps(s.subSteps);
+            }
+            return count;
+        },
+
+        execSummaryText(msg) {
+            if (msg.progressDone && msg.progressSummary) {
+                return msg.progressSummary;
+            }
+            // Dynamic summary for in-progress state
+            const stepCount = msg.progressSteps.length;
+            if (stepCount === 0) return '执行中...';
+            const totalTime = msg.progressSteps.reduce((sum, s) => sum + parseFloat(s.elapsed || 0), 0).toFixed(1);
+            return `${stepCount} 个步骤 · ${totalTime}s`;
+        },
+
+        execExtraText(msg) {
+            if (msg.progressDone) {
+                return msg.progressExtra || '';
+            }
+            // In-progress: show deepest running step name + elapsed
+            const running = this.findRunningStep(msg.progressSteps);
+            if (running) {
+                return `${running.displayName || running.name}  ${running.elapsed}s`;
+            }
+            return '';
         }
     },
 
