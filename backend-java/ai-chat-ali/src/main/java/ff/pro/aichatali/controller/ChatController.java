@@ -225,6 +225,9 @@ public class ChatController {
                     })
                     .doFinally(signal -> {
                         log.info("[SPAN] [{}] stream_finally signal={}", threadId, signal);
+                        if (hadError.get()) {
+                            chatHistoryService.deleteLastMessage(threadId);
+                        }
                         if (!hadError.get()) {
                             // Normal completion: push spanEnd + save history
                             String finalAnswer = lastFinalAnswer.get();

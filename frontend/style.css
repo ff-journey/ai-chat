@@ -2253,3 +2253,81 @@ textarea {
         padding: 4px 10px;
     }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Retry / Edit buttons on failed messages
+   ══════════════════════════════════════════════════════════════════════════════ */
+.retry-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.retry-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 14px;
+    font-size: 0.78rem;
+    font-family: inherit;
+    color: var(--primary-color);
+    background: rgba(255, 158, 153, 0.08);
+    border: 1.5px solid var(--primary-light);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.retry-btn:hover {
+    background: rgba(255, 158, 153, 0.18);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(255, 158, 153, 0.2);
+}
+
+.retry-edit-btn {
+    color: var(--text-color);
+    border-color: #e0d9f0;
+    background: rgba(124, 92, 191, 0.06);
+}
+
+.retry-edit-btn:hover {
+    background: rgba(124, 92, 191, 0.14);
+    box-shadow: 0 2px 8px rgba(124, 92, 191, 0.15);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Token counter
+   ══════════════════════════════════════════════════════════════════════════════ */
+.exec-token-count {
+    margin-left: auto;
+    font-size: 0.6rem;
+    color: var(--primary-color);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    opacity: 0.8;
+}
+
+.exec-token-count i {
+    margin-right: 3px;
+    font-size: 0.55rem;
+}
+
+.token-counter {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: 0.68rem;
+    color: var(--primary-color);
+    opacity: 0.85;
+    transition: opacity 0.5s ease;
+}
+
+.token-counter.token-fade {
+    opacity: 0;
+}
+
+.token-value {
+    font-variant-numeric: tabular-nums;
+}

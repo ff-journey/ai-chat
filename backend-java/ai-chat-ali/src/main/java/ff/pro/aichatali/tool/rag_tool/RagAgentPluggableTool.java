@@ -47,7 +47,7 @@ public class RagAgentPluggableTool implements PluggableTool {
     private final String toolIcon = "fa-robot";
 
     @Override
-    public List<String> getMutuallyExclusiveWith() { return List.of("ragTool", "webSearchTool"); }
+    public List<String> getMutuallyExclusiveWith() { return List.of("ragTool"); }
 
     @Override
     public boolean isAgent() { return true; }

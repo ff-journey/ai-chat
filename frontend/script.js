@@ -57,6 +57,7 @@ createApp({
             rootSpanId: null,     // supervisor span id (for detecting final span_end)
             ignoredSpanIds: {},   // LLM span ids (skipped in UI but must not trigger collapse)
             userScrolledUp: false,
+            tokenFading: false,
 
             // ─── documents ─────────────────────────────────────────
             documents: [],
@@ -282,7 +283,7 @@ createApp({
             this.$nextTick(() => { this.resetTextareaHeight(); this.scrollToBottom(true); });
 
             // Add thinking bubble
-            const botMsg = { isUser: false, text: '', isThinking: true, toolEvents: [], ragTrace: null, ragSteps: [], progressSteps: [], progressCollapsed: true, progressDone: false, progressSummary: '', progressExtra: '', phase: 'thinking', phaseStartTime: Date.now(), phaseElapsed: '0.0', _phaseTimerId: null };
+            const botMsg = { isUser: false, text: '', isThinking: true, isFailed: false, totalTokens: 0, _estimatedStreamTokens: 0, toolEvents: [], ragTrace: null, ragSteps: [], progressSteps: [], progressCollapsed: true, progressDone: false, progressSummary: '', progressExtra: '', phase: 'thinking', phaseStartTime: Date.now(), phaseElapsed: '0.0', _phaseTimerId: null };
             this.messages.push(botMsg);
             const botIdx = this.messages.length - 1;
             this.pendingBotIdx = botIdx;
@@ -298,6 +299,7 @@ createApp({
             }, 100);
 
             this.isLoading = true;
+            this.tokenFading = false;
             this.abortController = new AbortController();
 
             try {
@@ -366,6 +368,7 @@ createApp({
                     console.error(err);
                     this.messages[botIdx].isThinking = false;
                     this.messages[botIdx].text = `出错了：${err.message}`;
+                    this.messages[botIdx].isFailed = true;
                 }
             } finally {
                 this.isLoading = false;
@@ -379,7 +382,35 @@ createApp({
                 this.pendingBotIdx = -1;
                 this.userScrolledUp = false;
                 this.$nextTick(() => this.scrollToBottom(true));
+                setTimeout(() => { this.tokenFading = true; }, 1500);
             }
+        },
+
+        retryMessage(msgIndex) {
+            const botMsg = this.messages[msgIndex];
+            // Find the user message right before this bot message
+            const userIdx = msgIndex - 1;
+            if (userIdx < 0 || !this.messages[userIdx] || !this.messages[userIdx].isUser) return;
+            const userText = this.messages[userIdx].text || '';
+            this.messages.splice(userIdx, 2);
+            this.userInput = userText;
+            this.$nextTick(() => this.handleSend());
+        },
+
+        editAndRetry(msgIndex) {
+            const userIdx = msgIndex - 1;
+            if (userIdx < 0 || !this.messages[userIdx] || !this.messages[userIdx].isUser) return;
+            const userText = this.messages[userIdx].text || '';
+            this.messages.splice(userIdx, 2);
+            this.userInput = userText;
+            this.$nextTick(() => {
+                if (this.$refs.textarea) this.$refs.textarea.focus();
+            });
+        },
+
+        formatTokens(n) {
+            if (n >= 1000) return (n / 1000).toFixed(1) + 'k tokens';
+            return n + ' tokens';
         },
 
         async readSseStream(response, botIdx) {
@@ -434,12 +465,17 @@ createApp({
                                 this.messages[botIdx].isThinking = false;
                                 tokenBuffer += ev.text;
                                 scheduleFlush();
+                                // Estimate tokens for streaming counter (~1 token per 1.5 CJK chars)
+                                const est = Math.max(1, Math.ceil(ev.text.length / 1.5));
+                                this.messages[botIdx]._estimatedStreamTokens += est;
+                                this.messages[botIdx].totalTokens += est;
                             }
                         } else if (ev.type === 'span_start' || ev.type === 'span_end') {
                             this.handleObsEvent(ev, botIdx);
                         } else if (ev.type === 'error') {
                             this.messages[botIdx].isThinking = false;
                             this.messages[botIdx].text += `\n[Error: ${ev.message || ev.error}]`;
+                            this.messages[botIdx].isFailed = true;
                         }
                     } catch (e) {
                         console.warn('SSE parse error:', e, raw);
@@ -679,8 +715,15 @@ createApp({
                     msg.progressCollapsed = true;
                     return;
                 }
-                // LLM span_end — silently ignore, do NOT treat as supervisor end
+                // LLM span_end — extract token usage, do NOT treat as supervisor end
                 if (this.ignoredSpanIds[ev.spanId]) {
+                    if (ev.promptTokens || ev.completionTokens) {
+                        const realTokens = (ev.promptTokens || 0) + (ev.completionTokens || 0);
+                        // Correct streaming estimate with real values
+                        const estimated = msg._estimatedStreamTokens || 0;
+                        msg.totalTokens = msg.totalTokens - estimated + realTokens;
+                        msg._estimatedStreamTokens = 0;
+                    }
                     return;
                 }
                 // Agent/tool span_end — mark step done, auto-collapse its subtree

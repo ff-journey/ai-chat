@@ -1,7 +1,7 @@
-serverAddr = "ECS_PUBLIC_IP"
+serverAddr = "1.14.109.188"
 serverPort = 7000
 auth.method = "token"
-auth.token = "CHANGE_ME"
+auth.token = "96f899acbd32d20c9e506ba77c733fb2"
 
 [[proxies]]
 name = "cnn"

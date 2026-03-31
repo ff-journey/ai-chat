@@ -10,14 +10,15 @@ description: Deploy and operate the ai-chat project on Alibaba Cloud ECS (Linux)
 ```
 Home Windows (3060Ti)               Alibaba Cloud ECS (Linux)
 ┌──────────────────────┐            ┌──────────────────────────┐
-│  Python CNN  :9801   │──frpc──►   │  frps  :7000             │
-│  vLLM        :9901   │──frpc──►   │  Java  :8080  (public)   │
+│  Python CNN    :9801 │──frpc──►   │  frps  :7000             │
+│  Medical Svc   :9901 │──frpc──►   │  Java  :8080  (public)   │
 └──────────────────────┘  tunnel    └──────────────────────────┘
 ```
 
 - ECS runs: Java backend (port 8080, public-facing) + frps (port 7000, tunnel server)
-- Home runs: Python CNN (9801) + vLLM (9901), tunneled to ECS via frpc
-- Java backend calls CNN/vLLM at `127.0.0.1:9801/9901`; frp transparently forwards to home machine
+- Home runs: Python CNN (9801) + Medical Service (9901), tunneled to ECS via frpc
+- Java backend calls CNN/Medical at `127.0.0.1:9801/9901`; frp transparently forwards to home machine
+- Medical Service: `backend-python/medical_service/main.py` — OpenAI-compatible `/v1/chat/completions` API serving fine-tuned Qwen3 medical model via transformers (replaces previous vLLM deployment, same port 9901)
 
 ## Deploy Scripts Location (on ECS)
 
@@ -36,6 +37,17 @@ deploy/ecs/
 JDK version is declared in `.sdkmanrc` at the project root. `java-app.sh` sources SDKMAN and switches to that version automatically on each start.
 
 Home machine scripts: `deploy/home/` (run manually by user via PowerShell).
+
+```
+deploy/home/
+├── frpc.ps1           # .\frpc.ps1 start | stop
+├── cnn.ps1            # .\cnn.ps1 start | stop  (Python CNN, port 9801)
+├── medical.ps1        # .\medical.ps1 start | stop  (Medical Service, port 9901)
+└── config/
+    └── frpc.toml      # frpc config (serverAddr + auth.token must match frps.toml)
+```
+
+frpc binary: `G:\tool\frp\frp_0.68.0_windows_amd64\frpc.exe` (v0.68.0, matches ECS frps)
 
 ## ECS Connection
 
@@ -115,6 +127,16 @@ bash deploy/ecs/frps.sh start
 bash deploy/ecs/java-app.sh start
 ```
 
+Quick Home bootstrap order:
+```powershell
+# 1. Ensure Mihomo/Clash has 1.14.109.188 in DIRECT rules
+# 2. Start frpc tunnel
+.\deploy\home\frpc.ps1 start
+# 3. Start local services
+.\deploy\home\cnn.ps1 start        # CNN on :9801
+.\deploy\home\medical.ps1 start    # Medical on :9901
+```
+
 ## Environment Variables (.env on ECS)
 
 Located at `deploy/ecs/config/.env` (not in git). Keys:
@@ -137,7 +159,7 @@ ssh ... "nano <project>/deploy/ecs/config/.env"
 |---|---|
 | Java won't start | Check `.env` has required keys; JAR exists at expected path |
 | Port 8080 unreachable | ECS security group allows 8080; java-app.sh started successfully |
-| CNN/vLLM unreachable from ECS | frpc running on home; frps running on ECS; tokens match |
+| CNN/Medical unreachable from ECS | frpc running on home; frps running on ECS; tokens match |
 | Stale PID file | Delete `deploy/ecs/java-app.pid` or `frps.pid` manually, then restart |
 | Out of memory | `ssh ... "free -h"` then consider reducing JVM heap or stopping other processes |
 
@@ -153,3 +175,16 @@ ssh ... "nano <project>/deploy/ecs/config/.env"
 | frps.toml | `<project>/deploy/ecs/config/frps.toml` |
 | Java log | `<project>/deploy/ecs/java-app.log` |
 | frps log | `<project>/deploy/ecs/frps.log` |
+
+### Home Machine
+
+| Item | Path |
+|---|---|
+| frpc binary | `G:\tool\frp\frp_0.68.0_windows_amd64\frpc.exe` |
+| frpc.ps1 | `deploy\home\frpc.ps1` |
+| cnn.ps1 | `deploy\home\cnn.ps1` |
+| medical.ps1 | `deploy\home\medical.ps1` |
+| frpc.toml | `deploy\home\config\frpc.toml` |
+| frpc log | `deploy\home\frpc.log` |
+| CNN source | `backend-python\model_interface\main.py` (port 9801) |
+| Medical source | `backend-python\medical_service\main.py` (port 9901) |

@@ -300,19 +300,20 @@
                             </div>
                             <span class="phase-elapsed">{{ msg.phaseElapsed }}s</span>
                         </div>
-                        <!-- Skeleton shimmer (before first token in tools phase) -->
-                        <div v-if="(msg.phase === 'tools' && !msg.text)" class="skeleton-wrap">
+                        <!-- Skeleton shimmer (before first token, only when no exec steps yet) -->
+                        <div v-if="msg.phase === 'tools' && !msg.text && !(msg.progressSteps && msg.progressSteps.length)" class="skeleton-wrap">
                             <div class="skeleton-line" style="width:85%"></div>
                             <div class="skeleton-line" style="width:65%"></div>
                             <div class="skeleton-line" style="width:40%"></div>
                         </div>
                         <!-- Execution timeline (collapsible card) -->
-                        <div v-if="msg.progressSteps && msg.progressSteps.length" class="exec-card">
+                        <div v-if="msg.progressSteps && msg.progressSteps.length" :class="['exec-card', {'exec-done': msg.progressDone}]">
                             <div class="exec-card-header" @click="msg.progressCollapsed = !msg.progressCollapsed">
                                 <i class="fas fa-project-diagram exec-header-icon"></i>
                                 <span v-if="msg.progressCollapsed" class="exec-summary">
                                     {{ execSummaryText(msg) }}
                                     <span v-if="execExtraText(msg)" class="exec-extra">{{ execExtraText(msg) }}</span>
+                                    <span v-if="msg.totalTokens > 0" class="exec-token-count"><i class="fas fa-coins"></i> {{ formatTokens(msg.totalTokens) }}</span>
                                 </span>
                                 <span v-else class="exec-title">执行过程</span>
                                 <span v-if="!msg.progressCollapsed && currentStepName(msg)" class="exec-current-step">
@@ -429,6 +430,10 @@
                         <div class="message-content"
                              v-html="parseMarkdown(msg.text)"></div>
                         <span v-if="msg.phase === 'generating'" class="streaming-cursor"></span>
+                        <div v-if="msg.isFailed" class="retry-actions">
+                            <button @click="retryMessage(index)" class="retry-btn"><i class="fas fa-redo"></i> 重新发送</button>
+                            <button @click="editAndRetry(index)" class="retry-btn retry-edit-btn"><i class="fas fa-pen"></i> 修改</button>
+                        </div>
                         <!-- RAG trace (collapsible) -->
                         <div v-if="msg.ragTrace" class="message-meta">
                             <details class="reasoning-details">
@@ -528,6 +533,11 @@
                     <button v-else @click="handleSend" class="send-btn" title="发送">
                         <i class="fas fa-paper-plane"></i>
                     </button>
+                </div>
+                <div v-if="pendingBotIdx >= 0 && messages[pendingBotIdx] && messages[pendingBotIdx].totalTokens > 0"
+                     class="token-counter" :class="{'token-fade': tokenFading}">
+                    <i class="fas fa-coins"></i>
+                    <span class="token-value">{{ formatTokens(messages[pendingBotIdx].totalTokens) }}</span>
                 </div>
                 <div class="footer-text">AI 生成的内容可能包含错误，请仔细甄别。</div>
             </div>

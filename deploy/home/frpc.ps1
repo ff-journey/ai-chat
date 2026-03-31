@@ -6,7 +6,7 @@ param(
     [string]$Action
 )
 
-$FrpcBin  = "C:\frp\frpc.exe"
+$FrpcBin  = "G:\tool\frp\frp_0.68.0_windows_amd64\frpc.exe"
 $ConfigFile = "$PSScriptRoot\config\frpc.toml"
 $PidFile    = "$PSScriptRoot\frpc.pid"
 $LogFile    = "$PSScriptRoot\frpc.log"
@@ -14,10 +14,10 @@ $LogFile    = "$PSScriptRoot\frpc.log"
 switch ($Action) {
     "start" {
         if (Test-Path $PidFile) {
-            $pid = Get-Content $PidFile
-            $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+            $procId = Get-Content $PidFile
+            $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
             if ($proc) {
-                Write-Host "frpc is already running (PID: $pid)"
+                Write-Host "frpc is already running (PID: $procId)"
                 exit 1
             } else {
                 Write-Host "Stale PID file found, cleaning up..."
@@ -29,10 +29,11 @@ switch ($Action) {
             exit 1
         }
         Write-Host "Starting frpc..."
+        $errLog = "$PSScriptRoot\frpc-err.log"
         $proc = Start-Process -FilePath $FrpcBin `
             -ArgumentList "-c", $ConfigFile `
             -RedirectStandardOutput $LogFile `
-            -RedirectStandardError $LogFile `
+            -RedirectStandardError $errLog `
             -NoNewWindow -PassThru
         $proc.Id | Set-Content $PidFile
         Write-Host "frpc started (PID: $($proc.Id)), logs: $LogFile"
@@ -43,15 +44,15 @@ switch ($Action) {
             Write-Host "PID file not found. frpc may not be running."
             exit 1
         }
-        $pid = Get-Content $PidFile
-        $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+        $procId = Get-Content $PidFile
+        $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
         if ($proc) {
             Write-Host "Stopping frpc (PID: $pid)..."
-            Stop-Process -Id $pid -Force
+            Stop-Process -Id $procId -Force
             Remove-Item $PidFile -Force
             Write-Host "frpc stopped."
         } else {
-            Write-Host "Process $pid is not running. Cleaning up stale PID file."
+            Write-Host "Process $procId is not running. Cleaning up stale PID file."
             Remove-Item $PidFile -Force
             exit 1
         }

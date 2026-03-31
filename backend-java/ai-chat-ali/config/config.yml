@@ -5,6 +5,7 @@ ai:
   llm:
     model: ${value}
     api-key: ${value}
+    temperature: ${value}
   embedding:
     model: ${value}
     base-url: ${value}

@@ -15,6 +15,8 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
+import org.springframework.ai.chat.metadata.Usage;
+
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -73,6 +75,7 @@ public class LoggingModelInterceptor extends ModelInterceptor {
 
         if (response.getMessage() instanceof Flux) {
             AtomicReference<StringBuilder> buffer = new AtomicReference<>(new StringBuilder());
+            AtomicReference<Usage> lastUsage = new AtomicReference<>();
             Flux<ChatResponse> flux = (Flux<ChatResponse>) response.getMessage();
             boolean isSupervisor = "supervisor".equals(agentName);
             ModelRequest finalRequest = request;
@@ -86,6 +89,12 @@ public class LoggingModelInterceptor extends ModelInterceptor {
                         }
                     }
                 }
+                if (chunk.getMetadata() != null && chunk.getMetadata().getUsage() != null) {
+                    Usage usage = chunk.getMetadata().getUsage();
+                    if (usage.getPromptTokens() > 0 || usage.getCompletionTokens() > 0) {
+                        lastUsage.set(usage);
+                    }
+                }
             }).doOnError(e -> {
                 log.error("[SPAN] [{}] [llm:{}] call_error agent={} duration={}ms",
                         threadId, span.spanId(), agentName,
@@ -97,11 +106,14 @@ public class LoggingModelInterceptor extends ModelInterceptor {
                 }
             }).doOnComplete(() -> {
                 String fullText = buffer.get().toString();
-                log.info("[SPAN] [{}] [llm:{}] call_end agent={} duration={}ms len={}",
+                Usage usage = lastUsage.get();
+                Long promptTk = usage != null && usage.getPromptTokens() > 0 ? (long) usage.getPromptTokens() : null;
+                Long completionTk = usage != null && usage.getCompletionTokens() > 0 ? (long) usage.getCompletionTokens() : null;
+                log.info("[SPAN] [{}] [llm:{}] call_end agent={} duration={}ms len={} prompt_tokens={} completion_tokens={}",
                         threadId, span.spanId(), agentName,
-                        System.currentTimeMillis() - startTime, fullText.length());
+                        System.currentTimeMillis() - startTime, fullText.length(), promptTk, completionTk);
                 if (threadId != null) {
-                    sseService.push(threadId, TraceEvent.spanEnd(span, "ok", null));
+                    sseService.push(threadId, TraceEvent.spanEnd(span, "ok", null, promptTk, completionTk));
                 }
             });
             return ModelResponse.of(wrapped);

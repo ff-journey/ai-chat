@@ -17,28 +17,28 @@ import org.springframework.context.annotation.Primary;
 @Slf4j
 @Configuration
 public class ChatModelConfig {
-
-    @Bean
-    @Primary
-    public ChatModel dashScopeChatModel(
-            @Value("${ai.llm.api-key}") String apiKey,
-            @Value("${ai.llm.model}") String model,
-            @Value("${ai.llm.temperature:0.5}") Double temperature
-    ) {
-        DashScopeApi dashScopeApi = DashScopeApi.builder()
-                .apiKey(apiKey)
-                .build();
-
-        DashScopeChatOptions options = DashScopeChatOptions.builder()
-                .model(model)
-                .temperature(temperature)
-                .build();
-
-        log.info("ChatModel created: DashScope [model={}, temperature={}]", model, temperature);
-
-        return DashScopeChatModel.builder()
-                .dashScopeApi(dashScopeApi)
-                .defaultOptions(options)
-                .build();
-    }
+//
+//    @Bean
+//    @Primary
+//    public ChatModel dashScopeChatModel(
+//            @Value("${ai.llm.api-key}") String apiKey,
+//            @Value("${ai.llm.model}") String model,
+//            @Value("${ai.llm.temperature:0.5}") Double temperature
+//    ) {
+//        DashScopeApi dashScopeApi = DashScopeApi.builder()
+//                .apiKey(apiKey)
+//                .build();
+//
+//        DashScopeChatOptions options = DashScopeChatOptions.builder()
+//                .model(model)
+//                .temperature(temperature)
+//                .build();
+//
+//        log.info("ChatModel created: DashScope [model={}, temperature={}]", model, temperature);
+//
+//        return DashScopeChatModel.builder()
+//                .dashScopeApi(dashScopeApi)
+//                .defaultOptions(options)
+//                .build();
+//    }
 }

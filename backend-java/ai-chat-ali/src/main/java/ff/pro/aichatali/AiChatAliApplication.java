@@ -8,8 +8,6 @@ import com.alibaba.cloud.ai.autoconfigure.dashscope.DashScopeChatAutoConfigurati
 import com.alibaba.cloud.ai.autoconfigure.dashscope.DashScopeEmbeddingAutoConfiguration;
 
 @SpringBootApplication(exclude = {
-        OpenAiChatAutoConfiguration.class,          // Chat 由 ChatModelConfig 手动管理
-        DashScopeChatAutoConfiguration.class,        // Chat 由 ChatModelConfig 手动管理
         DashScopeEmbeddingAutoConfiguration.class,   // Embedding 用 OpenAI 兼容层 (SiliconFlow)
         MilvusVectorStoreAutoConfiguration.class
 })

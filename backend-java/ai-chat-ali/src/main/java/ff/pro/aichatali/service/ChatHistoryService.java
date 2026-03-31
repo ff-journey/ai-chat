@@ -56,6 +56,13 @@ public class ChatHistoryService {
         return history.keySet();
     }
 
+    public void deleteLastMessage(String threadId) {
+        List<MessageRecord> msgs = history.get(threadId);
+        if (msgs != null && !msgs.isEmpty()) {
+            msgs.remove(msgs.size() - 1);
+        }
+    }
+
     public void deleteThread(String threadId) {
         history.remove(threadId);
         titles.remove(threadId);

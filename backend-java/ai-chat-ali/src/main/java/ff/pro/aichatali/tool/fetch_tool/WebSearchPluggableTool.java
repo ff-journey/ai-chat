@@ -24,9 +24,6 @@ public class WebSearchPluggableTool implements PluggableTool {
     private final String toolIcon = "fa-globe";
 
     @Override
-    public List<String> getMutuallyExclusiveWith() { return List.of("ragAgentTool"); }
-
-    @Override
     public ToolCallback getToolCallback() {
         return FunctionToolCallback.builder(this.getName(), webSearchTool)
                 .description(getDescription())
