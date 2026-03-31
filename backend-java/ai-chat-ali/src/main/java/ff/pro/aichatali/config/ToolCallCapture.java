@@ -45,16 +45,19 @@ public class ToolCallCapture extends ToolInterceptor {
             sseService.push(threadId, TraceEvent.spanStart(span));
         }
 
+        String argsPreview = request.getArguments() != null ? request.getArguments().toString() : "";
+        if (argsPreview.length() > 200) argsPreview = argsPreview.substring(0, 200) + "...";
+        log.info("[SPAN] [{}] [tool:{}] call_start tool={} args={}", threadId, span.spanId(), toolName, argsPreview);
+
         ToolCallResponse response;
         try {
-            log.debug("Tool {} called: {}", toolName, request.getArguments());
             response = handler.call(request);
             String result = response.getResult();
-            String output = result != null && result.length() > 20
-                    ? result.substring(0, 20) + "..." : result;
-            log.debug("Tool {} result: {}", toolName, output);
+            String output = result != null && result.length() > 200
+                    ? result.substring(0, 200) + "..." : result;
+            log.info("[SPAN] [{}] [tool:{}] call_end tool={} result={}", threadId, span.spanId(), toolName, output);
         } catch (Exception e) {
-            log.error("Tool {} failed: {}", toolName, e.getMessage(), e);
+            log.error("[SPAN] [{}] [tool:{}] call_error tool={}: {}", threadId, span.spanId(), toolName, e.getMessage(), e);
             if (threadId != null) {
                 sseService.push(threadId, TraceEvent.spanEnd(span, "error", e.getMessage()));
             }

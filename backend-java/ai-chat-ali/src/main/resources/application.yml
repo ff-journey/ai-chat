@@ -8,18 +8,14 @@ spring:
     chat:
       client:
         enabled: false
-    openai:
+    dashscope:
       api-key: ${ai.llm.api-key}
-      base-url: ${ai.llm.base-url}
-      chat:
-        options:
-          model: ${ai.llm.model}
-          temperature: 0.5
+    openai:
+      api-key: ${ai.embedding.api-key}
+      base-url: ${ai.embedding.base-url}
       embedding:
-        api-key: ${ai.embedding.api-key}
         options:
           model: ${ai.embedding.model}
-        base-url: ${ai.embedding.base-url}
     vectorstore:
       milvus:
         client:
@@ -45,6 +41,8 @@ app:
     dir: uploads
   samples:
     dir: samples
+  stream:
+    timeout-minutes: 5
 
 medical:
   cnn:

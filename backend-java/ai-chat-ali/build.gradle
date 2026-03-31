@@ -47,6 +47,7 @@ dependencies {
     // Source: https://mvnrepository.com/artifact/io.zipkin.reporter2/zipkin-reporter-brave
 //    implementation("io.zipkin.reporter2:zipkin-reporter-brave:3.5.1")
     implementation 'org.springframework.ai:spring-ai-starter-model-openai'
+    implementation 'com.alibaba.cloud.ai:spring-ai-alibaba-starter-dashscope'
     implementation 'org.springframework.ai:spring-ai-pdf-document-reader'
     implementation 'org.springframework.ai:spring-ai-starter-vector-store-milvus'
     implementation 'com.google.guava:guava:32.1.3-jre'

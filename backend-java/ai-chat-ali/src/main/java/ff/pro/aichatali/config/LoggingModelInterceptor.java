@@ -44,8 +44,8 @@ public class LoggingModelInterceptor extends ModelInterceptor {
 
         Message last = request.getMessages().getLast();
         String inputPreview = messagePreview(last, 20);
-        log.info("=== LLM Call Start [{}] Last Message({}): {}",
-                agentName, last.getClass().getSimpleName(), inputPreview);
+        log.info("[SPAN] [{}] [llm:{}] call_start agent={} input={}",
+                threadId, span.spanId(), agentName, inputPreview);
         if (threadId != null) {
             sseService.push(threadId, TraceEvent.spanStart(span));
         }
@@ -57,7 +57,8 @@ public class LoggingModelInterceptor extends ModelInterceptor {
                         boolean emptyText = am.getText() == null || am.getText().isBlank();
                         boolean emptyTools = am.getToolCalls() == null || am.getToolCalls().isEmpty();
                         if (emptyText && emptyTools) {
-                            log.warn("Filtered empty AssistantMessage from conversation history");
+                            log.warn("[SPAN] [{}] [llm:{}] ANOMALY filtered_empty_assistant",
+                                    threadId, span.spanId());
                             return false;
                         }
                     }
@@ -86,19 +87,19 @@ public class LoggingModelInterceptor extends ModelInterceptor {
                     }
                 }
             }).doOnError(e -> {
-                log.error("=== LLM Call Error [{}] ({}ms)", agentName,
+                log.error("[SPAN] [{}] [llm:{}] call_error agent={} duration={}ms",
+                        threadId, span.spanId(), agentName,
                         System.currentTimeMillis() - startTime, e);
-                log.debug("=== LLM Call Error [{}]", finalRequest.getMessages().toString());
+                log.debug("[SPAN] [{}] [llm:{}] call_error messages={}", threadId, span.spanId(),
+                        finalRequest.getMessages().toString());
                 if (threadId != null) {
                     sseService.push(threadId, TraceEvent.spanEnd(span, "error", e.getMessage()));
                 }
             }).doOnComplete(() -> {
                 String fullText = buffer.get().toString();
-                String res = fullText.length() > 200
-                        ? fullText.substring(0, 200) + "..."
-                        : fullText;
-                log.info("=== LLM Call End [{}] ({}ms), {}", agentName,
-                        System.currentTimeMillis() - startTime, res);
+                log.info("[SPAN] [{}] [llm:{}] call_end agent={} duration={}ms len={}",
+                        threadId, span.spanId(), agentName,
+                        System.currentTimeMillis() - startTime, fullText.length());
                 if (threadId != null) {
                     sseService.push(threadId, TraceEvent.spanEnd(span, "ok", null));
                 }
@@ -107,11 +108,10 @@ public class LoggingModelInterceptor extends ModelInterceptor {
         } else {
             AssistantMessage msg = (AssistantMessage) response.getMessage();
             String text = msg.getText();
-            if (text != null && text.length() > 200) {
-                text = text.substring(0, 200) + "...";
-            }
-            log.info("=== LLM Call End [{}] ({}ms), {}", agentName,
-                    System.currentTimeMillis() - startTime, text);
+            log.info("[SPAN] [{}] [llm:{}] call_end agent={} duration={}ms len={}",
+                    threadId, span.spanId(), agentName,
+                    System.currentTimeMillis() - startTime,
+                    text != null ? text.length() : 0);
             return response;
         }
     }

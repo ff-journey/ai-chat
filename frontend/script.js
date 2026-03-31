@@ -165,7 +165,7 @@ createApp({
         },
 
         logout() {
-            this.messages.forEach(m => this.stopAllTimers(m.progressSteps));
+            this.messages.forEach(m => { this.stopAllTimers(m.progressSteps); if (m._phaseTimerId) clearInterval(m._phaseTimerId); });
             this.pendingBotIdx = -1;
             this.token     = null;
             this.loggedIn  = false;
@@ -236,7 +236,12 @@ createApp({
         scrollToBottom(force) {
             if (!this.$refs.chatContainer) return;
             if (!force && this.userScrolledUp) return;
-            this.$refs.chatContainer.scrollTop = this.$refs.chatContainer.scrollHeight;
+            const el = this.$refs.chatContainer;
+            if (this.isLoading) {
+                el.scrollTop = el.scrollHeight;
+            } else {
+                el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+            }
         },
         handleChatScroll() {
             const el = this.$refs.chatContainer;
@@ -277,13 +282,20 @@ createApp({
             this.$nextTick(() => { this.resetTextareaHeight(); this.scrollToBottom(true); });
 
             // Add thinking bubble
-            const botMsg = { isUser: false, text: '', isThinking: true, toolEvents: [], ragTrace: null, ragSteps: [], progressSteps: [], progressCollapsed: true, progressDone: false, progressSummary: '', progressExtra: '' };
+            const botMsg = { isUser: false, text: '', isThinking: true, toolEvents: [], ragTrace: null, ragSteps: [], progressSteps: [], progressCollapsed: true, progressDone: false, progressSummary: '', progressExtra: '', phase: 'thinking', phaseStartTime: Date.now(), phaseElapsed: '0.0', _phaseTimerId: null };
             this.messages.push(botMsg);
             const botIdx = this.messages.length - 1;
             this.pendingBotIdx = botIdx;
             this.spanMap = {};
             this.rootSpanId = null;
             this.ignoredSpanIds = {};
+
+            // Phase elapsed timer
+            botMsg._phaseTimerId = setInterval(() => {
+                if (this.messages[botIdx] && this.messages[botIdx].phase !== 'done') {
+                    this.messages[botIdx].phaseElapsed = ((Date.now() - this.messages[botIdx].phaseStartTime) / 1000).toFixed(1);
+                }
+            }, 100);
 
             this.isLoading = true;
             this.abortController = new AbortController();
@@ -359,7 +371,10 @@ createApp({
                 this.isLoading = false;
                 this.abortController = null;
                 if (this.pendingBotIdx >= 0 && this.messages[this.pendingBotIdx]) {
-                    this.stopAllTimers(this.messages[this.pendingBotIdx].progressSteps);
+                    const m = this.messages[this.pendingBotIdx];
+                    this.stopAllTimers(m.progressSteps);
+                    if (m._phaseTimerId) { clearInterval(m._phaseTimerId); m._phaseTimerId = null; }
+                    if (m.phase !== 'done') m.phase = 'done';
                 }
                 this.pendingBotIdx = -1;
                 this.userScrolledUp = false;
@@ -371,6 +386,22 @@ createApp({
             const reader  = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = '';
+
+            // Token batching: accumulate tokens and flush every 50ms
+            let tokenBuffer = '';
+            let flushTimer = null;
+            const flushTokens = () => {
+                if (tokenBuffer && this.messages[botIdx]) {
+                    this.messages[botIdx].text += tokenBuffer;
+                    tokenBuffer = '';
+                }
+                flushTimer = null;
+            };
+            const scheduleFlush = () => {
+                if (!flushTimer) {
+                    flushTimer = setTimeout(flushTokens, 50);
+                }
+            };
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -390,12 +421,19 @@ createApp({
                             if (ev.parentSpanId && this.spanMap[ev.parentSpanId]) {
                                 this.spanMap[ev.parentSpanId].thinkingText += ev.text;
                             } else {
-                                // First final-reply token → force collapse trace card
-                                if (!this.messages[botIdx].text) {
-                                    this.messages[botIdx].progressCollapsed = true;
+                                // First final-reply token → delayed collapse + phase transition
+                                if (!this.messages[botIdx].text && !tokenBuffer) {
+                                    this.messages[botIdx].phase = 'generating';
+                                    // Delayed collapse: wait 1.5s before collapsing exec-card
+                                    setTimeout(() => {
+                                        if (this.messages[botIdx]) {
+                                            this.messages[botIdx].progressCollapsed = true;
+                                        }
+                                    }, 1500);
                                 }
                                 this.messages[botIdx].isThinking = false;
-                                this.messages[botIdx].text += ev.text;
+                                tokenBuffer += ev.text;
+                                scheduleFlush();
                             }
                         } else if (ev.type === 'span_start' || ev.type === 'span_end') {
                             this.handleObsEvent(ev, botIdx);
@@ -407,9 +445,18 @@ createApp({
                         console.warn('SSE parse error:', e, raw);
                     }
                 }
-                this.$nextTick(() => this.scrollToBottom());
+                // Scrolling handled by watcher with rAF debounce
             }
+            // Flush remaining tokens
+            if (flushTimer) clearTimeout(flushTimer);
+            flushTokens();
             this.messages[botIdx].isThinking = false;
+            this.messages[botIdx].phase = 'done';
+            // Stop phase timer
+            if (this.messages[botIdx]._phaseTimerId) {
+                clearInterval(this.messages[botIdx]._phaseTimerId);
+                this.messages[botIdx]._phaseTimerId = null;
+            }
         },
 
         // ─── Session title ──────────────────────────────────────────
@@ -427,7 +474,7 @@ createApp({
 
         // ─── Navigation ─────────────────────────────────────────────
         handleNewChat() {
-            this.messages.forEach(m => this.stopAllTimers(m.progressSteps));
+            this.messages.forEach(m => { this.stopAllTimers(m.progressSteps); if (m._phaseTimerId) clearInterval(m._phaseTimerId); });
             this.pendingBotIdx  = -1;
             this.messages       = [];
             this.sessionId      = 'session_' + Date.now();
@@ -613,6 +660,10 @@ createApp({
                 // Auto-expand when first step arrives so user sees the trace live
                 if (!msg.progressDone) {
                     msg.progressCollapsed = false;
+                }
+                // Phase: thinking → tools on first non-supervisor/llm span
+                if (msg.phase === 'thinking') {
+                    msg.phase = 'tools';
                 }
                 this.startStepTimer(step);
 
@@ -847,12 +898,23 @@ createApp({
                 return `${running.displayName || running.name}  ${running.elapsed}s`;
             }
             return '';
+        },
+
+        phaseIndex(phase) {
+            const map = { thinking: 0, tools: 1, generating: 2, done: 3 };
+            return map[phase] ?? 0;
         }
     },
 
     watch: {
         messages: {
-            handler() { this.$nextTick(() => this.scrollToBottom()); },
+            handler() {
+                if (this._scrollRafId) return;
+                this._scrollRafId = requestAnimationFrame(() => {
+                    this._scrollRafId = null;
+                    this.scrollToBottom();
+                });
+            },
             deep: true
         }
     }

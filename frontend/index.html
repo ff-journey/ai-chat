@@ -229,6 +229,32 @@
 
                     <!-- Bot: thinking state -->
                     <template v-else-if="msg.isThinking && !msg.text && !(msg.progressSteps && msg.progressSteps.length)">
+                        <!-- Phase bar -->
+                        <div v-if="msg.phase && msg.phase !== 'done'" class="phase-bar">
+                            <div class="phase-steps">
+                                <div :class="['phase-step', {active: msg.phase === 'thinking', completed: phaseIndex(msg.phase) > 0}]">
+                                    <span class="phase-icon"><i class="fas fa-brain"></i></span>
+                                    <span class="phase-label">思考</span>
+                                </div>
+                                <div :class="['phase-connector', {completed: phaseIndex(msg.phase) > 0}]"></div>
+                                <div :class="['phase-step', {active: msg.phase === 'tools', completed: phaseIndex(msg.phase) > 1}]">
+                                    <span class="phase-icon"><i class="fas fa-wrench"></i></span>
+                                    <span class="phase-label">工具</span>
+                                </div>
+                                <div :class="['phase-connector', {completed: phaseIndex(msg.phase) > 1}]"></div>
+                                <div :class="['phase-step', {active: msg.phase === 'generating', completed: phaseIndex(msg.phase) > 2}]">
+                                    <span class="phase-icon"><i class="fas fa-pen"></i></span>
+                                    <span class="phase-label">生成</span>
+                                </div>
+                            </div>
+                            <span class="phase-elapsed">{{ msg.phaseElapsed }}s</span>
+                        </div>
+                        <!-- Skeleton shimmer -->
+                        <div class="skeleton-wrap">
+                            <div class="skeleton-line" style="width:85%"></div>
+                            <div class="skeleton-line" style="width:65%"></div>
+                            <div class="skeleton-line" style="width:40%"></div>
+                        </div>
                         <div class="message-content thinking-content">
                             <div class="thinking-header">
                                 <div class="thinking-dots">
@@ -254,6 +280,32 @@
 
                     <!-- Bot: response text (or exec-card arrived while still thinking) -->
                     <template v-else-if="!msg.isUser">
+                        <!-- Phase bar (visible during tools/generating phases) -->
+                        <div v-if="msg.phase && msg.phase !== 'done'" class="phase-bar">
+                            <div class="phase-steps">
+                                <div :class="['phase-step', {active: msg.phase === 'thinking', completed: phaseIndex(msg.phase) > 0}]">
+                                    <span class="phase-icon"><i class="fas fa-brain"></i></span>
+                                    <span class="phase-label">思考</span>
+                                </div>
+                                <div :class="['phase-connector', {completed: phaseIndex(msg.phase) > 0}]"></div>
+                                <div :class="['phase-step', {active: msg.phase === 'tools', completed: phaseIndex(msg.phase) > 1}]">
+                                    <span class="phase-icon"><i class="fas fa-wrench"></i></span>
+                                    <span class="phase-label">工具</span>
+                                </div>
+                                <div :class="['phase-connector', {completed: phaseIndex(msg.phase) > 1}]"></div>
+                                <div :class="['phase-step', {active: msg.phase === 'generating', completed: phaseIndex(msg.phase) > 2}]">
+                                    <span class="phase-icon"><i class="fas fa-pen"></i></span>
+                                    <span class="phase-label">生成</span>
+                                </div>
+                            </div>
+                            <span class="phase-elapsed">{{ msg.phaseElapsed }}s</span>
+                        </div>
+                        <!-- Skeleton shimmer (before first token in tools phase) -->
+                        <div v-if="(msg.phase === 'tools' && !msg.text)" class="skeleton-wrap">
+                            <div class="skeleton-line" style="width:85%"></div>
+                            <div class="skeleton-line" style="width:65%"></div>
+                            <div class="skeleton-line" style="width:40%"></div>
+                        </div>
                         <!-- Execution timeline (collapsible card) -->
                         <div v-if="msg.progressSteps && msg.progressSteps.length" class="exec-card">
                             <div class="exec-card-header" @click="msg.progressCollapsed = !msg.progressCollapsed">
@@ -271,7 +323,8 @@
                             <div v-show="!msg.progressCollapsed" class="exec-timeline">
                                 <div v-for="(step, si) in msg.progressSteps" :key="si" class="tl-node">
                                     <div class="tl-connector">
-                                        <span class="tl-branch">{{ si === msg.progressSteps.length - 1 ? '└─' : '├─' }}</span>
+                                        <span :class="['tl-dot', {done: step.done, error: step.error}]"></span>
+                                        <span v-if="si < msg.progressSteps.length - 1" class="tl-line"></span>
                                     </div>
                                     <div class="tl-content">
                                         <!-- Header: icon + name + timer -->
@@ -326,7 +379,8 @@
                                             <div v-for="(sub, ssi) in step.subSteps" :key="ssi"
                                                  v-show="!step.subStepsCollapsed" class="tl-node tl-sub">
                                                 <div class="tl-connector">
-                                                    <span class="tl-branch">{{ ssi === step.subSteps.length - 1 ? '└─' : '├─' }}</span>
+                                                    <span :class="['tl-dot', {done: sub.done, error: sub.error}]"></span>
+                                                    <span v-if="ssi < step.subSteps.length - 1" class="tl-line"></span>
                                                 </div>
                                                 <div class="tl-content">
                                                     <div class="tl-header" @click.stop="sub.expanded = !sub.expanded">
@@ -374,6 +428,7 @@
                         </div>
                         <div class="message-content"
                              v-html="parseMarkdown(msg.text)"></div>
+                        <span v-if="msg.phase === 'generating'" class="streaming-cursor"></span>
                         <!-- RAG trace (collapsible) -->
                         <div v-if="msg.ragTrace" class="message-meta">
                             <details class="reasoning-details">

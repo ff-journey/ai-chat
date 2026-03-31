@@ -8,6 +8,9 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+
+import reactor.core.scheduler.Schedulers;
 
 @Service
 @RequiredArgsConstructor
@@ -45,6 +48,20 @@ public class SseService {
         Sinks.Many<String> sink = sinks.remove(threadId);
         if (sink != null) {
             sink.tryEmitComplete();
+        }
+    }
+
+    /**
+     * Remove the sink immediately (blocks further pushes) but delay the complete signal
+     * so downstream consumers have time to read buffered events.
+     */
+    public void completeWithDelay(String threadId, long delayMs) {
+        Sinks.Many<String> sink = sinks.remove(threadId);
+        if (sink != null) {
+            Schedulers.parallel().schedule(
+                    sink::tryEmitComplete,
+                    delayMs, TimeUnit.MILLISECONDS
+            );
         }
     }
 }

@@ -30,6 +30,10 @@ import java.nio.file.Paths;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Primary chat endpoints. All variants emit JSON SSE events:
@@ -59,6 +63,9 @@ public class ChatController {
 
     @Value("${app.samples.dir:samples}")
     private String samplesDir;
+
+    @Value("${app.stream.timeout-minutes:5}")
+    private int streamTimeoutMinutes;
 
     record ChatRequest(String message, String userId, String sessionId) {}
 
@@ -130,7 +137,14 @@ public class ChatController {
 
         sseService.createSink(threadId);
         sseService.push(threadId, TraceEvent.spanStart(rootSpan));
-        StringBuilder aiResponse = new StringBuilder();
+
+        // Per-round buffer — reset on each new STREAMING after a FINISHED
+        AtomicReference<StringBuilder> roundBuffer = new AtomicReference<>(new StringBuilder());
+        AtomicReference<String> lastFinalAnswer = new AtomicReference<>("");
+        AtomicBoolean roundFinished = new AtomicBoolean(false);
+        AtomicInteger roundCounter = new AtomicInteger(1);
+        AtomicBoolean hadError = new AtomicBoolean(false);
+
         try {
             Sinks.Empty<Void> doneSink = Sinks.empty();
 
@@ -141,57 +155,96 @@ public class ChatController {
                         try {
                             OutputType type = so.getOutputType();
                             String text = so.message() != null ? so.message().getText() : null;
+
                             if (type == OutputType.AGENT_MODEL_STREAMING) {
+                                // Detect new round: previous round was FINISHED, now STREAMING again
+                                if (roundFinished.getAndSet(false)) {
+                                    int round = roundCounter.incrementAndGet();
+                                    roundBuffer.set(new StringBuilder());
+                                    log.info("[SPAN] [{}] round:{} started", threadId, round);
+                                }
                                 if (text != null && !text.isEmpty()) {
-                                    aiResponse.append(text);
-//                                    log.debug("[STREAM] token len={}, total={}", text.length(), aiResponse.length());
+                                    roundBuffer.get().append(text);
                                     return Flux.just(jsonEvent("token", Map.<String, Object>of("text", text)));
                                 }
                             } else if (type == OutputType.AGENT_MODEL_FINISHED) {
-                                // Fallback: if streaming tokens were missed, emit the full response
-                                log.info("[FINISHED] text len={}, alreadySent len={}",
-                                        text != null ? text.length() : 0, aiResponse.length());
+                                String streamed = roundBuffer.get().toString();
+                                int round = roundCounter.get();
+                                roundFinished.set(true);
+
+                                log.info("[SPAN] [{}] round:{} finished text_len={} streamed_len={}",
+                                        threadId, round,
+                                        text != null ? text.length() : 0, streamed.length());
+
+                                // Save this round's final content (overwrite, don't accumulate)
+                                if (!streamed.isEmpty()) {
+                                    lastFinalAnswer.set(streamed);
+                                }
+
+                                // Fallback: compensate for missed streaming tokens based on current round only
                                 if (text != null && !text.isEmpty()) {
-                                    String alreadySent = aiResponse.toString();
-                                    if (alreadySent.isEmpty()) {
-                                        aiResponse.append(text);
+                                    if (streamed.isEmpty()) {
+                                        // Entire round's streaming was lost — use FINISHED text as fallback
+                                        roundBuffer.get().append(text);
+                                        lastFinalAnswer.set(text);
                                         return Flux.just(jsonEvent("token", Map.<String, Object>of("text", text)));
-                                    } else if (text.length() > alreadySent.length() && text.startsWith(alreadySent)) {
-                                        String remaining = text.substring(alreadySent.length());
-                                        aiResponse.append(remaining);
+                                    } else if (text.length() > streamed.length() && text.startsWith(streamed)) {
+                                        // Partial streaming loss — emit the delta
+                                        String remaining = text.substring(streamed.length());
+                                        roundBuffer.get().append(remaining);
+                                        lastFinalAnswer.set(roundBuffer.get().toString());
                                         return Flux.just(jsonEvent("token", Map.<String, Object>of("text", remaining)));
                                     }
+                                } else if (streamed.isEmpty()) {
+                                    // Anomaly: both FINISHED text and streaming are empty
+                                    log.warn("[SPAN] [{}] round:{} ANOMALY empty_round — LLM returned no content",
+                                            threadId, round);
                                 }
                             }
                         } catch (Exception e) {
-                            log.warn("SSE flatMap error (type={}): {}", so.getOutputType(), e.getMessage(), e);
+                            log.warn("[SPAN] [{}] flatMap error (type={}): {}",
+                                    threadId, so.getOutputType(), e.getMessage(), e);
                         }
                         return Flux.empty();
                     })
-                    .doOnComplete(() -> {
-                        log.info("[COMPLETE] aiResponse len={}, content={}",
-                                aiResponse.length(),
-                                aiResponse.length() > 100 ? aiResponse.substring(0, 100) + "..." : aiResponse);
-                        sseService.push(threadId, TraceEvent.spanEnd(rootSpan, "ok", null));
-                        if (!aiResponse.isEmpty()) {
-                            chatHistoryService.addMessage(threadId, "assistant", aiResponse.toString());
-                            if (chatHistoryService.getTitle(threadId) == null) {
-                                chatHistoryService.setTitle(threadId, truncate(titleHint, 20));
-                            }
-                        }
-                    })
+                    .timeout(Duration.ofMinutes(streamTimeoutMinutes))
                     .doOnError(e -> {
-                        log.error("Stream error for thread {}: {}", threadId, e.getMessage());
+                        hadError.set(true);
+                        if (e instanceof TimeoutException) {
+                            log.warn("[SPAN] [{}] TIMEOUT stream exceeded {}min", threadId, streamTimeoutMinutes);
+                        } else {
+                            log.error("[SPAN] [{}] stream_error: {}", threadId, e.getMessage());
+                        }
                         sseService.push(threadId, TraceEvent.spanEnd(rootSpan, "error", e.getMessage()));
                     })
                     .onErrorResume(e -> {
-                        String errorJson = jsonEvent("token", Map.<String, Object>of(
-                                "text", "\n\n抱歉，处理过程中出现错误: " + e.getMessage()));
-                        return Flux.just(errorJson);
+                        String msg = (e instanceof TimeoutException)
+                                ? "响应超时，请重试"
+                                : "抱歉，处理过程中出现错误: " + e.getMessage();
+                        return Flux.just(jsonEvent("token", Map.<String, Object>of("text", "\n\n" + msg)));
                     })
                     .doFinally(signal -> {
-                        log.info("[FINALLY] signal={}, aiResponse len={}", signal, aiResponse.length());
-                        sseService.complete(threadId);
+                        log.info("[SPAN] [{}] stream_finally signal={}", threadId, signal);
+                        if (!hadError.get()) {
+                            // Normal completion: push spanEnd + save history
+                            String finalAnswer = lastFinalAnswer.get();
+                            int totalRounds = roundCounter.get();
+                            log.info("[SPAN] [{}] stream_complete rounds={} final_len={}",
+                                    threadId, totalRounds, finalAnswer.length());
+                            sseService.push(threadId, TraceEvent.spanEnd(rootSpan, "ok", null));
+                            if (finalAnswer.isEmpty()) {
+                                log.warn("[SPAN] [{}] ANOMALY no_final_answer rounds={}", threadId, totalRounds);
+                                sseService.push(threadId,
+                                        TraceEvent.error(rootSpan.spanId(), "AI 未能生成回复，请重试"));
+                            } else {
+                                chatHistoryService.addMessage(threadId, "assistant", finalAnswer);
+                                if (chatHistoryService.getTitle(threadId) == null) {
+                                    chatHistoryService.setTitle(threadId, truncate(titleHint, 20));
+                                }
+                            }
+                        }
+                        // Delay complete so downstream consumers can read buffered events
+                        sseService.completeWithDelay(threadId, 100);
                         doneSink.tryEmitEmpty();
                     });
 
@@ -204,7 +257,7 @@ public class ChatController {
 
             return Flux.merge(tokens, eventFlux, keepalive);
         } catch (GraphRunnerException e) {
-            log.error("Stream error for thread {}: {}", threadId, e.getMessage());
+            log.error("[SPAN] [{}] stream_error: {}", threadId, e.getMessage());
             sseService.complete(threadId);
             return Flux.error(e);
         }

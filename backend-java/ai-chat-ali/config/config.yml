@@ -4,7 +4,6 @@ service:
 ai:
   llm:
     model: ${value}
-    base-url: ${value}
     api-key: ${value}
   embedding:
     model: ${value}
