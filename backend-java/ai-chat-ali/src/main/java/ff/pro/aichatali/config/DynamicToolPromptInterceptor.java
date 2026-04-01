@@ -8,9 +8,12 @@ import ff.pro.aichatali.common.SysContext;
 import ff.pro.aichatali.service.ToolRegistryService;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.collections4.CollectionUtils;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
@@ -30,7 +33,14 @@ public class DynamicToolPromptInterceptor extends ModelInterceptor {
         if (toolFlag == null) {
             return handler.call(request);
         }
-        request.getOptions().setToolCallbacks(toolRegistryService.dynamicCallbacks((int) toolFlag));
+        List<ToolCallback> toolCallbacks = toolRegistryService.dynamicCallbacks((int) toolFlag);
+        request.getOptions().setToolCallbacks(toolCallbacks);
+//        SystemMessage sysMessage = request.getSystemMessage();
+//        String toolDescription = toolCallbacks.stream()
+//                .map(it -> " - %s : %s".formatted(it.getToolDefinition().name(), it.getToolDefinition().description()))
+//                .collect(Collectors.joining("\n"));
+//
+//        SystemMessage newSysMessage = SystemMessage.builder().text(sysMessage.getText()+(toolDescription)).build();
 
         ModelRequest enhancedRequest = ModelRequest.builder(request).build();
         return handler.call(enhancedRequest);

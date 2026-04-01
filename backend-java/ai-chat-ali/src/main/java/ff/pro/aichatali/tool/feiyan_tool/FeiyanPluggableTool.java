@@ -29,7 +29,7 @@ public class FeiyanPluggableTool implements PluggableTool {
 
     private final String title = "肺炎分析";
 
-    private final String description = "胸部X光影像肺炎快速分类，返回是否肺炎及置信度。仅做影像分类，不提供诊断建议。";
+    private final String description = "胸部X光影像肺炎快速分类：接收用户上传的胸部X光图像，通过CNN模型分析，返回是否肺炎及置信度。仅做影像分类，不提供诊断建议。";
 
     private final String toolIcon = "fa-lungs";
 

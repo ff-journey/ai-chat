@@ -26,10 +26,13 @@ public class MedicalDiagnosisPluggableTool implements PluggableTool {
 
     private final String name = "medicalDiagnosisTool";
     private final String title = "医疗问诊";
+//    private final String description = """
+//            专业医疗诊断推理, 不提供医疗知识问询：根据患者主诉和已有检查材料进行系统性推理，给出鉴别诊断和处理建议（不替代专业医生）
+//             → 若症状信息充足，汇总病情信息后直接调用 medicalDiagnosisTool
+//             → 若症状信息不足（缺少持续时间、既往病史、用药史），主动追问后再调用medicalDiagnosisTool
+//            """;
     private final String description = """
-            专业医疗诊断推理, 不提供医疗知识问询：根据患者主诉和已有检查材料进行系统性推理，给出鉴别诊断和处理建议（不替代专业医生）
-             → 若症状信息充足，汇总病情信息后直接调用 medicalDiagnosisTool
-             → 若症状信息不足（缺少持续时间、既往病史、用药史），主动追问后再调用medicalDiagnosisTool
+            医疗诊断推理：基于患者症状和检查结果进行鉴别诊断推理。调用前应确保已通过知识检索获取相关参考资料（如有）。症状信息不足时先向用户追问。
             """;
     private final String toolIcon = "fa-stethoscope";
 

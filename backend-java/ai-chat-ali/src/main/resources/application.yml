@@ -70,7 +70,7 @@ tools:
   medical-diagnosis:
     enabled: true         # MedicalDiagnosisPluggableTool — 纯 vLLM 医疗问诊（与 pneumonia 互斥时可独立启用）
   rag-agent:
-    enabled: true         # RagAgentPluggableTool — 混合检索子 Agent（启用时建议关闭 rag + websearch）
+    enabled: false         # RagAgentPluggableTool — 混合检索子 Agent（启用时建议关闭 rag + websearch）
     max-iterations: 5
 
 logging:
@@ -87,3 +87,8 @@ reranker:
 web-search:
   api-key: ${ai.web-search.api-key}
   base-url: ${ai.web-search.base-url}
+
+rate-limit:
+  window-seconds: 3600
+  max-rounds: 50
+  reminder-interval: 10

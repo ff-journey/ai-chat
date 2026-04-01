@@ -23,6 +23,9 @@ public class CleanupService {
     @Autowired
     private ChatHistoryService chatHistoryService;
 
+    @Autowired
+    private RateLimitService rateLimitService;
+
     @Value("${app.upload.dir:uploads}")
     private String uploadDir;
 
@@ -34,6 +37,11 @@ public class CleanupService {
     @Scheduled(fixedDelay = 3_600_000)
     void cleanHistory() {
         chatHistoryService.deleteOlderThan(Duration.ofDays(7));
+    }
+
+    @Scheduled(fixedDelay = 3_600_000)
+    void cleanRateLimits() {
+        rateLimitService.cleanup();
     }
 
     @Scheduled(cron = "0 0 0 * * *")

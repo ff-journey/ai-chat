@@ -64,7 +64,13 @@ createApp({
             documentsLoading: false,
             selectedFile: null,
             isUploading: false,
-            uploadProgress: ''
+            uploadProgress: '',
+
+            // ─── rate limit ──────────────────────────────────────
+            rateLimitUsed: 0,
+            rateLimitLimit: 0,
+            showRateLimitReminder: false,
+            rateLimitBlocked: false
         };
     },
 
@@ -343,6 +349,25 @@ createApp({
                         }),
                         signal: this.abortController.signal
                     });
+                }
+
+                // Read rate limit headers
+                const rlUsed = response.headers.get('X-RateLimit-Used');
+                const rlLimit = response.headers.get('X-RateLimit-Limit');
+                if (rlUsed !== null) this.rateLimitUsed = parseInt(rlUsed);
+                if (rlLimit !== null) this.rateLimitLimit = parseInt(rlLimit);
+
+                if (response.status === 429) {
+                    const errData = await response.json();
+                    this.rateLimitBlocked = true;
+                    this.messages[botIdx].isThinking = false;
+                    this.messages[botIdx].text = errData.message || '对话次数已用尽，请稍后再试';
+                    this.messages[botIdx].isFailed = true;
+                    return;
+                }
+
+                if (response.headers.get('X-RateLimit-Reminder') === 'true') {
+                    this.showRateLimitReminder = true;
                 }
 
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);

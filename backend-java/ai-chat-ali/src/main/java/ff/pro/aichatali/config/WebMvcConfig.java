@@ -27,9 +27,13 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Autowired
     private AuthInterceptor authInterceptor;
 
+    @Autowired
+    private RateLimitInterceptor rateLimitInterceptor;
+
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(authInterceptor)
+                .order(0)
                 .addPathPatterns("/**")
                 .excludePathPatterns(
                         "/api/auth/**",
@@ -42,6 +46,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/samples/**",
                         "/api/samples/**"
                 );
+        registry.addInterceptor(rateLimitInterceptor)
+                .order(1)
+                .addPathPatterns("/chat/**");
     }
 
     @Override

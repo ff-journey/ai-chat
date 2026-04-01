@@ -43,7 +43,11 @@ public class RagAgentPluggableTool implements PluggableTool {
 
     private final String name = "ragAgentTool";
     private final String title = "混合检索";
-    private final String description = "混合检索助手：优先搜索内部知识库，必要时联网补充最新信息，综合生成完整答案";
+//    private final String description = "混合检索助手：优先搜索内部知识库，必要时联网补充最新信息，综合生成完整答案";
+    private final String description = """
+        医学知识检索与循证参考：针对疾病、症状、用药、治疗方案等医疗问题，检索权威医学知识库获取循证依据。涉及医疗健康类问题时应优先调用。
+        """;
+
     private final String toolIcon = "fa-robot";
 
     @Override

@@ -577,6 +577,48 @@
         </div>
     </div>
 
+    <!-- ═══ Rate Limit Reminder Modal ═════════════════════════════════════════ -->
+    <div v-if="showRateLimitReminder" class="modal-overlay" @click.self="showRateLimitReminder = false">
+        <div class="sample-picker-modal" style="max-width:400px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-exclamation-circle" style="color:#e6a23c;"></i> 使用提醒</h3>
+                <button @click="showRateLimitReminder = false" class="close-btn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" style="text-align:center;padding:1.5rem;">
+                <p style="font-size:1.1rem;margin-bottom:0.5rem;">
+                    已使用 <strong>{{ rateLimitUsed }}</strong> / <strong>{{ rateLimitLimit }}</strong> 轮对话
+                </p>
+                <p style="color:#888;font-size:0.9rem;">请合理使用，额度每 2 小时自动重置</p>
+                <button @click="showRateLimitReminder = false" class="btn-primary" style="margin-top:1rem;">
+                    我知道了
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Rate Limit Blocked Modal ═══════════════════════════════════════════ -->
+    <div v-if="rateLimitBlocked" class="modal-overlay" @click.self="rateLimitBlocked = false">
+        <div class="sample-picker-modal" style="max-width:400px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-ban" style="color:#f56c6c;"></i> 次数已用尽</h3>
+                <button @click="rateLimitBlocked = false" class="close-btn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" style="text-align:center;padding:1.5rem;">
+                <p style="font-size:1.1rem;margin-bottom:0.5rem;">
+                    对话次数已达上限（<strong>{{ rateLimitLimit }}</strong> 轮/2小时）
+                </p>
+                <p style="color:#888;font-size:0.9rem;">请等待额度重置后再继续使用</p>
+                <button @click="rateLimitBlocked = false" class="btn-primary" style="margin-top:1rem;">
+                    我知道了
+                </button>
+            </div>
+        </div>
+    </div>
+
 </div><!-- #app -->
 
 <script src="script.js"></script>

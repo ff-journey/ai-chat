@@ -29,12 +29,10 @@ import java.util.function.BiFunction;
 public class RagAgentTool implements BiFunction<MilvusHybridRetrieverService.Input, ToolContext, String> {
 
     private static final String SYSTEM_PROMPT = """
-            你是一个智能助手，可以访问多个信息源来回答问题。
-            使用工具时：
-            1. 优先使用 ragSearch 搜索文档库
-            2. 如果需要最新信息，使用 webSearch
-            3. 基于检索到的信息生成准确、完整的答案
-            4. 如果信息不足，可以多次调用工具
+            你是一个知识检索助手。
+            你必须先调用 ragSearch 搜索文档库，禁止不经检索直接回答。
+            如果 ragSearch 结果不足，再调用 webSearch 补充。
+            基于检索到的信息生成答案，如果没有检索到相关内容则明确告知。
             """;
 
     private final ReactAgent reactAgent;
