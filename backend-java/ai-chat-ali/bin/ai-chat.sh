@@ -32,7 +32,7 @@ case "$1" in
       fi
     fi
     echo "Starting ai-chat..."
-    nohup java -jar "$JAR_FILE" >> "$LOG_FILE" 2>&1 &
+    nohup java -jar "$JAR_FILE" --spring.config.additional-location=file:config/config.yml >> "$LOG_FILE" 2>&1 &
     PID=$!
     echo "$PID" > "$PID_FILE"
     echo "Application started (PID: $PID), logs: $LOG_FILE"
