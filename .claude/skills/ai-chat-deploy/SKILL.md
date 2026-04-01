@@ -27,7 +27,7 @@ Home Windows (3060Ti)               Alibaba Cloud ECS (Linux)
 ## ECS Connection
 
 ```bash
-ssh -i ~/.ssh/id_ed25519 root@1.14.109.188   # GitHub SSH key auth
+ssh -i ~/.ssh/id_ed25519_github root@1.14.109.188   # GitHub SSH key auth
 ```
 
 Project root on ECS: `~/ai-chat`
@@ -92,7 +92,7 @@ ssh root@1.14.109.188 "cd /opt/ai-chat-boot && bash bin/ai-chat.sh stop; bash bi
 ssh root@1.14.109.188 "cat /opt/ai-chat-boot/app.pid 2>/dev/null && kill -0 \$(cat /opt/ai-chat-boot/app.pid) && echo running || echo stopped"
 
 # frps running?
-ssh root@1.14.109.188 "cat ~/ai-chat/deploy/ecs/frps.pid 2>/dev/null && kill -0 \$(cat ~/ai-chat/deploy/ecs/frps.pid) && echo running || echo stopped"
+ssh root@1.14.109.188 "cat /opt/frp/frps.pid 2>/dev/null && kill -0 \$(cat /opt/frp/frps.pid) && echo running || echo stopped"
 
 # Ports listening?
 ssh root@1.14.109.188 "ss -tlnp | grep -E '8080|7000|9801|9901'"
@@ -102,7 +102,7 @@ ssh root@1.14.109.188 "tail -100 /opt/ai-chat-boot/console.log"
 ssh root@1.14.109.188 "tail -f /opt/ai-chat-boot/console.log"   # live follow
 
 # frps logs
-ssh root@1.14.109.188 "tail -50 ~/ai-chat/deploy/ecs/frps.log"
+ssh root@1.14.109.188 "tail -50 /opt/frp/frps.log"
 ```
 
 ## Home Machine Services
@@ -136,9 +136,9 @@ JINA_API_KEY=
 | App config | `/opt/ai-chat-boot/config/` |
 | App log | `/opt/ai-chat-boot/console.log` |
 | App PID | `/opt/ai-chat-boot/app.pid` |
-| frps script | `~/ai-chat/deploy/ecs/frps.sh` |
-| frps config | `~/ai-chat/deploy/ecs/config/frps.toml` |
-| frps log | `~/ai-chat/deploy/ecs/frps.log` |
+| frps script | `/opt/frp/frps.sh` |
+| frps config | `/opt/frp/frps.toml` |
+| frps log | `/opt/frp/frps.log` |
 | frpc binary (home) | `G:\tool\frp\frp_0.68.0_windows_amd64\frpc.exe` |
 
 ## Troubleshooting
