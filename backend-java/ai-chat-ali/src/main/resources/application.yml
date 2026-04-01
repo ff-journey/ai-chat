@@ -54,6 +54,7 @@ medical:
   cnn:
     url: ${ai.medical.cnn.url}
     enabled: true
+    transfer-mode: file  # path = POST JSON file_path (本地部署), file = POST multipart (分机部署)
   vllm:
     url: ${ai.medical.model.url}
     model: ${ai.medical.model.name}

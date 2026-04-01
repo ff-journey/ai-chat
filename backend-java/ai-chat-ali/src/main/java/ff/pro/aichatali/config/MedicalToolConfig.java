@@ -19,6 +19,8 @@ public class MedicalToolConfig {
     public static class CnnConfig {
         private String url = "http://localhost:5000/api/pneumonia/predict";
         private boolean enabled = true;
+        /** "path" = POST JSON file_path (local deploy), "file" = POST multipart file (remote deploy via frp) */
+        private String transferMode = "path";
     }
 
     @Data

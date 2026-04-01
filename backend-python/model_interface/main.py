@@ -1,7 +1,8 @@
 import numpy as np
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
 from PIL import Image
+import io
 import os
 import time
 import logging
@@ -104,31 +105,16 @@ def is_xray_image(image: Image.Image) -> bool:
     # 均值偏低（X光片整体较暗），标准差较高（对比度强）
     return mean_brightness < 180 and std_brightness > 40
 
-# ===================== 预测接口 =====================
-@app.post("/api/pneumonia/predict", summary="肺炎图片识别")
-async def predict(request: PredictRequest):
+# ===================== 共享推理逻辑 =====================
+def run_inference(image: Image.Image, source_desc: str) -> dict:
+    """对已打开的 PIL Image 执行推理，返回结果字典。"""
     start_time = time.time()
-    logger.info(f"收到预测请求: file_path={request.file_path}")
-
-    if not os.path.exists(request.file_path):
-        logger.warning(f"文件不存在: {request.file_path}")
-        raise HTTPException(status_code=400, detail=f"文件不存在: {request.file_path}")
-
-    # 校验文件格式
-    if not request.file_path.lower().endswith((".jpg", ".jpeg", ".png")):
-        logger.warning(f"不支持的文件格式: {request.file_path}")
-        raise HTTPException(status_code=400, detail="仅支持jpg/png图片")
-
     try:
-
-        # 1. 读取图片
-        image = Image.open(request.file_path).convert("RGB")
         if not is_xray_image(image):
             return {"result": "非X光图片，无法识别", "confidence": 0.0}
-        # 2. 预处理
-        img_tensor = transform(image).unsqueeze(0).to(DEVICE)  # 增加batch维度
 
-        # 3. PyTorch推理（禁用梯度计算，提速）
+        img_tensor = transform(image).unsqueeze(0).to(DEVICE)
+
         with torch.no_grad():
             output = model(img_tensor)
             confidence = torch.softmax(output, dim=1)
@@ -142,17 +128,46 @@ async def predict(request: PredictRequest):
 
         if best_conf < 0.9:
             result = {"result": "无法识别肺炎分类, 或高度疑似非X光图片", "confidence": best_conf}
-            logger.info(f"预测完成 [{elapsed}s]: {result} | 各类置信度: {confidences}")
+            logger.info(f"预测完成 [{elapsed}s] ({source_desc}): {result} | 各类置信度: {confidences}")
             return result
 
         result = {"result": best_class, "confidence": best_conf}
-        logger.info(f"预测完成 [{elapsed}s]: {result} | 各类置信度: {confidences}")
+        logger.info(f"预测完成 [{elapsed}s] ({source_desc}): {result} | 各类置信度: {confidences}")
         return result
 
     except Exception as e:
         elapsed = round(time.time() - start_time, 3)
-        logger.error(f"预测失败 [{elapsed}s]: {str(e)}", exc_info=True)
+        logger.error(f"预测失败 [{elapsed}s] ({source_desc}): {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"预测失败：{str(e)}")
+
+
+# ===================== 预测接口 =====================
+@app.post("/api/pneumonia/predict", summary="肺炎图片识别(文件路径)")
+async def predict(request: PredictRequest):
+    logger.info(f"收到预测请求: file_path={request.file_path}")
+
+    if not os.path.exists(request.file_path):
+        logger.warning(f"文件不存在: {request.file_path}")
+        raise HTTPException(status_code=400, detail=f"文件不存在: {request.file_path}")
+
+    if not request.file_path.lower().endswith((".jpg", ".jpeg", ".png")):
+        logger.warning(f"不支持的文件格式: {request.file_path}")
+        raise HTTPException(status_code=400, detail="仅支持jpg/png图片")
+
+    image = Image.open(request.file_path).convert("RGB")
+    return run_inference(image, f"path={request.file_path}")
+
+
+@app.post("/api/pneumonia/predict/upload", summary="肺炎图片识别(文件上传)")
+async def predict_upload(file: UploadFile = File(...)):
+    logger.info(f"收到上传预测请求: filename={file.filename}, content_type={file.content_type}")
+
+    if not (file.filename or "").lower().endswith((".jpg", ".jpeg", ".png")):
+        raise HTTPException(status_code=400, detail="仅支持jpg/png图片")
+
+    contents = await file.read()
+    image = Image.open(io.BytesIO(contents)).convert("RGB")
+    return run_inference(image, f"upload={file.filename}")
 
 
 # 健康检查

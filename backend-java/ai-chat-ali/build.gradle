@@ -138,13 +138,24 @@ task dist {
         }
 
         // 复制 config/ 目录（外部配置，Spring Boot 自动加载，可覆盖 JAR 内配置）
+        // 策略：如果存在 config-local.yml，用其内容覆盖 config.yml，打包时排除 config-local.yml
+        //       这样 dist 产物里只有一份 config.yml（含实际配置值），本地开发不受影响
         def srcConfig = file("${projectDir}/config")
         if (srcConfig.exists()) {
             def dstConfig = file("${distOutputDir}/config")
             ant.copy(todir: dstConfig) {
-                ant.fileset(dir: srcConfig)
+                ant.fileset(dir: srcConfig) {
+                    ant.exclude(name: 'config-local.yml')
+                }
             }
-            println "   config/        (${srcConfig.listFiles()?.length ?: 0} files)"
+            def localYml = file("${srcConfig}/config-local.yml")
+            if (localYml.exists()) {
+                def dstYml = file("${dstConfig}/config.yml")
+                dstYml.text = localYml.text
+                println "   config/        (config-local.yml → config.yml)"
+            } else {
+                println "   config/        (${srcConfig.listFiles()?.length ?: 0} files, no local override)"
+            }
         } else {
             println "   [WARN] config/ not found at ${srcConfig.path}, skipped"
         }

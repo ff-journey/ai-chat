@@ -3,7 +3,7 @@
 ## Connection Info
 
 - IP: `1.14.109.188`
-- SSH: `ssh root@1.14.109.188` (public key auth, no password needed)
+- SSH: `ssh -i ~/.ssh/id_ed25519 root@1.14.109.188` (GitHub SSH key auth)
 - OS: OpenCloudOS 9, x86_64
 
 ## 1. Download & Install frps

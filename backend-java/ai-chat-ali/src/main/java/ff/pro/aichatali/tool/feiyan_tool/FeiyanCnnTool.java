@@ -7,9 +7,14 @@ import ff.pro.aichatali.config.MedicalToolConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.http.*;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.function.BiFunction;
 
@@ -52,14 +57,37 @@ public class FeiyanCnnTool implements BiFunction<FeiyanCnnTool.Input, ToolContex
         }
 
         try {
-            Map<String, String> requestBody = Map.of("file_path", imagePath);
+            boolean fileMode = "file".equalsIgnoreCase(config.getCnn().getTransferMode());
+            ResponseEntity<String> response;
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<Map<String, String>> entity = new HttpEntity<>(requestBody, headers);
+            if (fileMode) {
+                // file mode: read image bytes, POST as multipart/form-data to /upload endpoint
+                byte[] imageBytes = Files.readAllBytes(Path.of(imagePath));
+                String filename = Path.of(imagePath).getFileName().toString();
 
-            ResponseEntity<String> response = restTemplate.exchange(
-                    config.getCnn().getUrl(), HttpMethod.POST, entity, String.class);
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+                MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+                body.add("file", new ByteArrayResource(imageBytes) {
+                    @Override
+                    public String getFilename() {
+                        return filename;
+                    }
+                });
+
+                HttpEntity<MultiValueMap<String, Object>> entity = new HttpEntity<>(body, headers);
+                response = restTemplate.exchange(
+                        config.getCnn().getUrl() + "/upload", HttpMethod.POST, entity, String.class);
+            } else {
+                // path mode: POST JSON file_path (original logic)
+                Map<String, String> requestBody = Map.of("file_path", imagePath);
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                HttpEntity<Map<String, String>> entity = new HttpEntity<>(requestBody, headers);
+                response = restTemplate.exchange(
+                        config.getCnn().getUrl(), HttpMethod.POST, entity, String.class);
+            }
 
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
                 JsonNode root = objectMapper.readTree(response.getBody());
