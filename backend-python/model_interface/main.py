@@ -30,8 +30,8 @@ stream_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
 
 # ===================== 【必填】修改为你的模型参数 =====================
-# MODEL_PATH = "./models/feiyan_distillation.pth"  # 你的.pth模型路径
-MODEL_PATH = "./models/model_feiyan.pth"  # 你的.pth模型路径
+MODEL_PATH = "./models/feiyan_distillation.pth"  # 你的.pth模型路径
+# MODEL_PATH = "./models/model_feiyan.pth"  # 你的.pth模型路径
 IMAGE_SIZE = (512, 512)  # 训练时的图片尺寸(必须一致)
 IS_GRAYSCALE = True  # 肺炎X光一般是灰度图=True
 
