@@ -26,6 +26,7 @@ import io.milvus.v2.service.vector.response.SearchResp;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Repository;
 
@@ -130,6 +131,9 @@ public class RagChunkMapperImpl implements RagChunkMapper {
 
     @Override
     public void batchInsert(List<RagChunkPo> chunks) {
+        if (CollectionUtils.isEmpty(chunks)) {
+            return;
+        }
         List<JsonObject> rows = new ArrayList<>();
         for (RagChunkPo c : chunks) {
             JsonObject obj = new JsonObject();

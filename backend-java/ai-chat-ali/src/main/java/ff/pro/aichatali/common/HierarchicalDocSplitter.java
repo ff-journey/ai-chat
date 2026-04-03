@@ -55,7 +55,9 @@ public class HierarchicalDocSplitter {
             // 规则切割：父层级直接硬切, 子层级找最近的语义边界
             int end = hardEnd;
             String chunkText = text.substring(start, end);
-            if (chunkText.length() >= minSize) {
+            boolean isLastChunk = (end == text.length());
+            // 最后一个chunk不受minSize限制，避免短文档/短尾部被丢弃
+            if (isLastChunk ||chunkText.length() >= minSize) {
                 Document doc = toDoc(sourceId, parentId, level, chunkText);
                 chunks.add(doc);
             }
