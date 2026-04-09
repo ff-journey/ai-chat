@@ -17,6 +17,8 @@ public class RerankService {
     private String rerankerApiKey;
     @Value("${reranker.base-url}")
     private String rerankerApiUrl;
+    @Value("${reranker.model}")
+    private String rerankerModel;
 
     private final RestClient restClient = RestClient.create();
 
@@ -25,7 +27,7 @@ public class RerankService {
 
         // 构造请求体
         var body = Map.of(
-                "model", "jina-reranker-v2-base-multilingual",
+                "model", rerankerModel,
                 "query", query,
                 "documents", docs.stream().map(Document::getText).toList(),
                 "top_n", Math.min(topK, docs.size())

@@ -48,6 +48,7 @@ public class DocumentService {
     final HierarchicalDocSplitter hierarchicalDocSplitter;
     final RagChunkMapper ragChunkMapper;
     final EmbeddingService embeddingService;
+    final ff.pro.aichatali.service.rag.BM25Service bm25Service;
 
     public record ProcessResult(String filename, int chunks, String url) {}
 
@@ -133,9 +134,15 @@ public class DocumentService {
         if (!Files.exists(filePath)) return false;
         try {
             Files.delete(filePath);
-            // Remove Milvus chunks indexed under this filename as sourceId
-            ragChunkMapper.deleteBySourceId(filename);
-            log.info("Deleted document '{}' and its vector chunks", filename);
+            // source_id in Milvus/parent_chunks is the original filename (without UUID prefix)
+            String sourceId = filename.length() > 37 ? filename.substring(37) : filename;
+            // Remove Milvus L3 chunks
+            ragChunkMapper.deleteBySourceId(sourceId);
+            // Remove L1/L2 parent chunks from local store
+            ragChunkMapper.deleteParentChunksBySourceId(sourceId);
+            // Remove from in-memory BM25 index
+            bm25Service.removeBySourceId(sourceId);
+            log.info("Deleted document '{}' (sourceId='{}') and all associated chunks", filename, sourceId);
             return true;
         } catch (IOException e) {
             log.error("Failed to delete document '{}': {}", filename, e.getMessage());

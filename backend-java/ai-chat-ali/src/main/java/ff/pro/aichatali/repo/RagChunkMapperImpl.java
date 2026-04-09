@@ -223,6 +223,19 @@ public class RagChunkMapperImpl implements RagChunkMapper {
         return ids.stream().map(id -> store.getOrDefault(id, new Document(""))).toList();
     }
 
+    @Override
+    public void deleteParentChunksBySourceId(String sourceId) {
+        List<String> toRemove = store.entrySet().stream()
+                .filter(e -> sourceId.equals(e.getValue().getMetadata().get("source_id")))
+                .map(Map.Entry::getKey)
+                .toList();
+        toRemove.forEach(store::remove);
+        if (!toRemove.isEmpty()) {
+            persist();
+            log.info("Removed {} parent chunks for source_id '{}'", toRemove.size(), sourceId);
+        }
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     record DocumentDTO(String id, String text, Map<String, Object> metadata) {}
 

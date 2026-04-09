@@ -156,6 +156,12 @@ task dist {
             } else {
                 println "   config/        (${srcConfig.listFiles()?.length ?: 0} files, no local override)"
             }
+            // Ensure all config files use Unix LF (Windows builds may produce CRLF)
+            dstConfig.eachFile { f ->
+                if (f.name.endsWith('.yml') || f.name.endsWith('.example')) {
+                    f.text = f.text.replace('\r\n', '\n').replace('\r', '\n')
+                }
+            }
         } else {
             println "   [WARN] config/ not found at ${srcConfig.path}, skipped"
         }

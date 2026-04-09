@@ -29,6 +29,16 @@ public class BM25Service {
             tokenizedDocs.add(tokenize(doc.getText()==null ? "" : doc.getText()));
         }
     }
+
+    public synchronized void removeBySourceId(String sourceId) {
+        for (int i = indexedDocs.size() - 1; i >= 0; i--) {
+            Object sid = indexedDocs.get(i).getMetadata().get("source_id");
+            if (sourceId.equals(sid)) {
+                indexedDocs.remove(i);
+                tokenizedDocs.remove(i);
+            }
+        }
+    }
     private JiebaSegmenter jiebaSegmenter = new JiebaSegmenter();
 
     public List<Document> search(String query, int topK) {

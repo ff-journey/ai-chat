@@ -14,4 +14,5 @@ public interface RagChunkMapper {
     void insertParentChunk(String id, Document doc);
     Optional<Document> getParentChunk(String id);
     List<Document> getParentChunk(List<String> ids);
+    void deleteParentChunksBySourceId(String sourceId);
 }

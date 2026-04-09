@@ -83,6 +83,7 @@ logging:
 reranker:
   api-key: ${ai.reranker.api-key}
   base-url: ${ai.reranker.base-url}
+  model: ${ai.reranker.model}
 
 web-search:
   api-key: ${ai.web-search.api-key}

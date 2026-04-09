@@ -63,10 +63,10 @@ cd backend-java/ai-chat-ali && ./gradlew dist
 # 2. Stop remote app
 ssh root@1.14.109.188 "cd /opt/ai-chat-boot && bash bin/ai-chat.sh stop"
 
-# 3. Upload to ECS
-cd <rootDir> && tar cf /tmp/ai-chat-boot.tar ai-chat-boot/
+# 3. Upload to ECS (preserve uploads/, data/, .env, logs)
+cd <rootDir> && tar cf /tmp/ai-chat-boot.tar ai-chat-boot/bin/ ai-chat-boot/lib/ ai-chat-boot/config/ ai-chat-boot/samples/
 scp /tmp/ai-chat-boot.tar root@1.14.109.188:/tmp/
-ssh root@1.14.109.188 "rm -rf /opt/ai-chat-boot && tar xf /tmp/ai-chat-boot.tar -C /opt/ && rm /tmp/ai-chat-boot.tar"
+ssh root@1.14.109.188 "tar xf /tmp/ai-chat-boot.tar -C /opt/ && rm /tmp/ai-chat-boot.tar"
 
 # 4. First deploy only: configure .env
 ssh root@1.14.109.188 "cp /opt/ai-chat-boot/config/.env.example /opt/ai-chat-boot/config/.env"
@@ -136,6 +136,8 @@ JINA_API_KEY=
 | App config | `/opt/ai-chat-boot/config/` |
 | App log | `/opt/ai-chat-boot/console.log` |
 | App PID | `/opt/ai-chat-boot/app.pid` |
+| RAG documents | `/opt/ai-chat-boot/uploads/rag_repo/` (**preserve on deploy**) |
+| Parent chunks | `/opt/ai-chat-boot/data/parent_chunks.json` (**preserve on deploy**) |
 | frps script | `/opt/frp/frps.sh` |
 | frps config | `/opt/frp/frps.toml` |
 | frps log | `/opt/frp/frps.log` |
