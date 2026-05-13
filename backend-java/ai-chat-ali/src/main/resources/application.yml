@@ -91,5 +91,5 @@ web-search:
 
 rate-limit:
   window-seconds: 3600
-  max-rounds: 50
-  reminder-interval: 10
+  max-rounds: 5
+  reminder-interval: 2
