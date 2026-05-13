@@ -19,7 +19,6 @@ ai:
     api-key: ${value}
     base-url: ${value}
     model: ${value}
-    model: ${value}
   web-search:
     api-key: ${value}
     base-url: ${value}
